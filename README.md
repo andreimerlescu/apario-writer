@@ -14,7 +14,6 @@ presents to end users at the configured domain name.
 ## Usage
 
 ```shell
-apario-writer --help
 apario-writer \
   --download-pdf-url "https://www.cia.gov/readingroom/docs/CIA-RDP96-00788R001500160012-7.pdf" \
   --database-directory "/idoread.com-data/stargate-tmp" \
@@ -22,6 +21,14 @@ apario-writer \
   --metadata-json "{\"Collection\":\"STARGATE\",\"Released At\":\"2004-05-17\",\"Created At\":\"2016-11-04\"}" \
   --log "/var/log/idoread.com/apario-writer.log"
 ```
+
+**__NOTE__**: 
+1. The `--database-directory` is required on every command unless a `--config config.yaml` defines it elsewhere.
+2. The `--pdf-title` is required when using `--download-pdf-url`.
+3. The `--metadata-json` is always optional but must be a flattened map[string]string of data only (KEY=VALUE list).
+4. The `--log` flag when omitted assumes a local directory called `logs` exists for it to write an `engine-*.log` file.
+5. In addition to `--download-pdf-url` additional options can be used. Currently XLSX and CSV uploads are permitted, however the header/column titles are fixed and must be defined according to specifications. They were designed for the STARGATE files and the JFK Assassination records originally.
+
 
 Output: 
 
@@ -46,6 +53,14 @@ Output:
 ```
 
 This is the default intended usage of the `apario-writer` application. 
+
+## Known Limitations
+
+- Currently the `page.<dark|light>.#######.social.jpg` is not created in the pipeline.
+- No `<basename-no-extension>.dark.pdf` file is created. Only the original PDF is downloaded and replaced with OCR.
+- Extracted text may come from a PDF file whose keywords are more than 17 chars. If so, they keywords are concatenated into the extracted text.
+- Not tested on Windows as there are a lot of runtime requirements. Tested on MacOS and Rocky Linux.
+- Using the docker container wrapper requires knowledge of how to use Docker in a less than "hello world" manner.
 
 ## License
 
