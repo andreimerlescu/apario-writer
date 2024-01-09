@@ -27,10 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	`github.com/andreimerlescu/configurable`
-	cwg `github.com/andreimerlescu/go-countable-waitgroup`
-	sema `github.com/andreimerlescu/go-sema`
-	ch `github.com/andreimerlescu/go-smartchan`
+	con `github.com/andreimerlescu/configurable`
+	gem `github.com/andreimerlescu/go-gematria`
+	sem `github.com/andreimerlescu/go-sema`
+	sch `github.com/andreimerlescu/go-smartchan`
 )
 
 const (
@@ -41,7 +41,7 @@ const (
 
 var (
 	startedAt = time.Now().UTC()
-	config    = configurable.New()
+	config    = con.New()
 
 	// Integers
 	channel_buffer_size    int = 1          // Buffered Channel's Size
@@ -53,21 +53,13 @@ var (
 	color_text       = color.RGBA{R: 250, G: 226, B: 203, A: 255} // sky yellow
 
 	// Strings
-	dir_data_directory    string
 	dir_current_directory string
 
 	// Maps
-	m_cryptonyms          = make(map[string]string)
-	m_location_cities     []*Location
-	m_location_countries  []*Location
-	m_location_states     []*Location
-	m_used_identifiers    = make(map[string]bool)
-	m_required_binaries   = make(map[string]string)
-	m_language_dictionary = make(map[string]map[string]struct{})
-	m_gcm_jewish          = make(GemCodeMap)
-	m_gcm_english         = make(GemCodeMap)
-	m_gcm_simple          = make(GemCodeMap)
-	m_months              = map[string]time.Month{
+	m_cryptonyms        = make(map[string]string)
+	m_used_identifiers  = make(map[string]bool)
+	m_required_binaries = make(map[string]string)
+	m_months            = map[string]time.Month{
 		"jan": time.January, "january": time.January, "01": time.January, "1": time.January,
 		"feb": time.February, "february": time.February, "02": time.February, "2": time.February,
 		"mar": time.March, "march": time.March, "03": time.March, "3": time.March,
@@ -91,11 +83,8 @@ var (
 	re_date6 = regexp.MustCompile(`(\d{4})`)
 
 	// Synchronization
-	mu_identifier         = sync.RWMutex{}
-	mu_location_countries = sync.RWMutex{}
-	mu_location_states    = sync.RWMutex{}
-	mu_location_cities    = sync.RWMutex{}
-	wg_active_tasks       = cwg.CountableWaitGroup{}
+	mu_identifier = sync.RWMutex{}
+	//wg_active_tasks = cwg.CountableWaitGroup{}
 
 	// Command Line Flags
 	flag_s_config_file               = config.NewString("config", filepath.Join(".", "config.yaml"), "Configuration file")
@@ -112,6 +101,7 @@ var (
 	flag_s_csv_column_path           = config.NewString("csv-column-path", "", "value of row 1 whose column correlates to absolute paths of PDF files")
 	flag_s_csv_column_record_number  = config.NewString("csv-column-record-number", "", "value of row 1 whose column correlates to a unique record identifier or number")
 	flag_s_csv_column_title          = config.NewString("csv-column-title", "", "value of row 1 whose column correlates to the title of the document")
+	flag_b_disable_clamav            = config.NewBool("no-clam", false, "disable clamav antivirus scanning of downloaded files")
 	flag_s_pdf_title                 = config.NewString("pdf-title", "", "title of the document")
 	flag_s_pdf_metadata_json         = config.NewString("metadata-json", "", "json key value map[string]string")
 	flag_s_database_directory        = config.NewString("database-directory", "", "the database directory for the apario-reader instance to consume")
@@ -146,52 +136,60 @@ var (
 		"tesseract",
 		"clamscan",
 	}
+	sl_required_binaries_no_clam = []string{
+		"pdfcpu",
+		"gs",
+		"pdftotext",
+		"convert",
+		"pdftoppm",
+		"tesseract",
+	}
 
 	// Atomics
-	a_b_dictionary_loaded = atomic.Bool{}
-	a_b_gematria_loaded   = atomic.Bool{}
-	a_b_locations_loaded  = atomic.Bool{}
-	a_i_total_pages       = atomic.Int64{}
+	a_i_total_pages        = atomic.Int64{}
+	a_i_received_documents = atomic.Int32{}
+	a_i_total_documents    = atomic.Int32{}
 
 	// Concurrent Maps
 	sm_page_directories sync.Map
+	sm_resultdatas      sync.Map
 	sm_documents        sync.Map
 	sm_pages            sync.Map
 
 	// Semaphores
-	sem_tesseract  = sema.New(*flag_b_sem_tesseract)
-	sem_download   = sema.New(*flag_b_sem_download)
-	sem_pdfcpu     = sema.New(*flag_b_sem_pdfcpu)
-	sem_gs         = sema.New(*flag_b_sem_gs)
-	sem_pdftotext  = sema.New(*flag_b_sem_pdftotext)
-	sem_convert    = sema.New(*flag_b_sem_convert)
-	sem_pdftoppm   = sema.New(*flag_b_sem_pdftoppm)
-	sem_png2jpg    = sema.New(*flag_g_sem_png2jpg)
-	sem_resize     = sema.New(*flag_g_sem_resize)
-	sem_shafile    = sema.New(*flag_g_sem_shafile)
-	sema_watermark = sema.New(*flag_g_sem_watermark)
-	sem_darkimage  = sema.New(*flag_g_sem_darkimage)
-	sem_filedata   = sema.New(*flag_g_sem_filedata)
-	sem_shastring  = sema.New(*flag_g_sem_shastring)
-	sem_wjsonfile  = sema.New(*flag_g_sem_wjsonfile)
+	sem_tesseract  = sem.New(*flag_b_sem_tesseract)
+	sem_download   = sem.New(*flag_b_sem_download)
+	sem_pdfcpu     = sem.New(*flag_b_sem_pdfcpu)
+	sem_gs         = sem.New(*flag_b_sem_gs)
+	sem_pdftotext  = sem.New(*flag_b_sem_pdftotext)
+	sem_convert    = sem.New(*flag_b_sem_convert)
+	sem_pdftoppm   = sem.New(*flag_b_sem_pdftoppm)
+	sem_png2jpg    = sem.New(*flag_g_sem_png2jpg)
+	sem_resize     = sem.New(*flag_g_sem_resize)
+	sem_shafile    = sem.New(*flag_g_sem_shafile)
+	sema_watermark = sem.New(*flag_g_sem_watermark)
+	sem_darkimage  = sem.New(*flag_g_sem_darkimage)
+	sem_filedata   = sem.New(*flag_g_sem_filedata)
+	sem_shastring  = sem.New(*flag_g_sem_shastring)
+	sem_wjsonfile  = sem.New(*flag_g_sem_wjsonfile)
 
 	// Channels
-	ch_ImportedRow       = ch.NewSmartChan(channel_buffer_size)
-	ch_ExtractText       = ch.NewSmartChan(channel_buffer_size)
-	ch_ExtractPages      = ch.NewSmartChan(channel_buffer_size)
-	ch_GeneratePng       = ch.NewSmartChan(channel_buffer_size)
-	ch_GenerateLight     = ch.NewSmartChan(channel_buffer_size)
-	ch_GenerateDark      = ch.NewSmartChan(channel_buffer_size)
-	ch_ConvertToJpg      = ch.NewSmartChan(channel_buffer_size)
-	ch_PerformOcr        = ch.NewSmartChan(channel_buffer_size)
-	ch_AnalyzeText       = ch.NewSmartChan(channel_buffer_size)
-	ch_AnalyzeCryptonyms = ch.NewSmartChan(channel_buffer_size)
-	ch_AnalyzeGematria   = ch.NewSmartChan(channel_buffer_size)
-	ch_AnalyzeLocations  = ch.NewSmartChan(channel_buffer_size)
-	ch_AnalyzeDictionary = ch.NewSmartChan(channel_buffer_size)
-	ch_CompletedPage     = ch.NewSmartChan(channel_buffer_size)
-	ch_CompiledDocument  = ch.NewSmartChan(channel_buffer_size)
-	ch_Done              = make(chan struct{}, 1)
+	ch_ImportedRow       = sch.NewSmartChan(channel_buffer_size)
+	ch_ExtractText       = sch.NewSmartChan(channel_buffer_size)
+	ch_ExtractPages      = sch.NewSmartChan(channel_buffer_size)
+	ch_GeneratePng       = sch.NewSmartChan(channel_buffer_size)
+	ch_GenerateLight     = sch.NewSmartChan(channel_buffer_size)
+	ch_GenerateDark      = sch.NewSmartChan(channel_buffer_size)
+	ch_ConvertToJpg      = sch.NewSmartChan(channel_buffer_size)
+	ch_PerformOcr        = sch.NewSmartChan(channel_buffer_size)
+	ch_AnalyzeText       = sch.NewSmartChan(channel_buffer_size)
+	ch_AnalyzeCryptonyms = sch.NewSmartChan(channel_buffer_size)
+	ch_CompletedPage     = sch.NewSmartChan(channel_buffer_size)
+	ch_CompiledDocument  = sch.NewSmartChan(channel_buffer_size)
+	ch_CompileDarkPDF    = sch.NewSmartChan(channel_buffer_size) // TODO: implement the CompileDarkPDF channel
+	ch_CompileSocialCard = sch.NewSmartChan(channel_buffer_size) // TODO: implement the CompileSocialCard channel
+
+	ch_Done = make(chan struct{}, 1)
 )
 
 type Document struct {
@@ -201,6 +199,7 @@ type Document struct {
 	TotalPages          int64          `json:"total_pages"`
 	CoverPageIdentifier string         `json:"cover_page_identifier"`
 	Collection          Collection     `json:"collection"`
+	mu                  *sync.Mutex
 }
 
 type Page struct {
@@ -208,30 +207,39 @@ type Page struct {
 	DocumentIdentifier string            `json:"document_identifier"`
 	PageNumber         int64             `json:"page_number"`
 	Metadata           map[string]string `json:"metadata"`
-	FullTextGematria   GemScore          `json:"full_text_gematria"`
+	FullTextGematria   gem.Gematria      `json:"full_text_gematria"`
 	FullText           string            `json:"full_text"`
-	Locations          []*Location       `json:"locations"`
 }
 
-type Geography struct {
-	Countries []CountableLocation `json:"countries"`
-	States    []CountableLocation `json:"states"`
-	Cities    []CountableLocation `json:"cities"`
+type PDFCPUInfoResponseInfo struct {
+	Source             string         `json:"source"`
+	Version            string         `json:"version"`
+	Pages              int            `json:"pages"`
+	Title              string         `json:"title"`
+	Author             string         `json:"author"`
+	Subject            string         `json:"subject"`
+	CreationDate       string         `json:"creationDate"`
+	ModificationDate   string         `json:"modificationDate"`
+	Keywords           []string       `json:"keywords"`
+	Properties         map[string]any `json:"properties"`
+	Tagged             bool           `json:"tagged"`
+	Hybrid             bool           `json:"hybrid"`
+	Linearized         bool           `json:"linearized"`
+	UsingXRefStreams   bool           `json:"usingXRefStreams"`
+	UsingObjectStreams bool           `json:"usingObjectStreams"`
+	Watermarked        bool           `json:"watermarked"`
+	Thumbnails         bool           `json:"thumbnails"`
+	Form               bool           `json:"form"`
+	Signatures         bool           `json:"signatures"`
+	AppendOnly         bool           `json:"appendOnly"`
+	Bookmarks          bool           `json:"bookmarks"`
+	Names              bool           `json:"names"`
+	Encrypted          bool           `json:"encrypted"`
+	Permissions        int            `json:"permissions"`
 }
-
-type CountableLocation struct {
-	Location *Location `json:"location"`
-	Quantity int       `json:"quantity"`
-}
-
-type Location struct {
-	Continent   string  `json:"continent"`
-	Country     string  `json:"country"`
-	CountryCode string  `json:"country_code"`
-	City        string  `json:"city"`
-	State       string  `json:"state"`
-	Longitude   float64 `json:"longitude"`
-	Latitude    float64 `json:"latitude"`
+type PDFCPUInfoResponse struct {
+	Header map[string]string        `json:"header"`
+	Infos  []PDFCPUInfoResponseInfo `json:"Infos"`
 }
 
 type Collection struct {
@@ -240,16 +248,18 @@ type Collection struct {
 }
 
 type ResultData struct {
-	Identifier        string            `json:"identifier"`
-	URL               string            `json:"url"`
-	DataDir           string            `json:"data_dir"`
-	PDFPath           string            `json:"pdf_path"`
-	PDFChecksum       string            `json:"pdf_checksum"`
-	OCRTextPath       string            `json:"ocr_text_path"`
-	ExtractedTextPath string            `json:"extracted_text_path"`
-	RecordPath        string            `json:"record_path"`
-	TotalPages        int64             `json:"total_pages"`
-	Metadata          map[string]string `json:"metadata"`
+	Identifier        string                 `json:"identifier"`
+	URL               string                 `json:"url"`
+	DataDir           string                 `json:"data_dir"`
+	PDFPath           string                 `json:"pdf_path"`
+	URLChecksum       string                 `json:"url_checksum"`
+	PDFChecksum       string                 `json:"pdf_checksum"`
+	OCRTextPath       string                 `json:"ocr_text_path"`
+	ExtractedTextPath string                 `json:"extracted_text_path"`
+	RecordPath        string                 `json:"record_path"`
+	TotalPages        int64                  `json:"total_pages"`
+	Info              PDFCPUInfoResponseInfo `json:"info"`
+	Metadata          map[string]string      `json:"metadata"`
 }
 
 type JPEG struct {
@@ -263,21 +273,18 @@ type PNG struct {
 }
 
 type PendingPage struct {
-	Identifier       string              `json:"identifier"`
-	RecordIdentifier string              `json:"record_identifier"`
-	PageNumber       int                 `json:"page_number"`
-	PDFPath          string              `json:"pdf_path"`
-	PagesDir         string              `json:"pages_dir"`
-	OCRTextPath      string              `json:"ocr_text_path"`
-	ManifestPath     string              `json:"manifest_path"`
-	Language         string              `json:"language"`
-	Words            []WordResult        `json:"words"`
-	Cryptonyms       []string            `json:"cryptonyms"`
-	Dates            []time.Time         `json:"dates"`
-	Geography        Geography           `json:"geography"`
-	Gematrias        map[string]Gematria `json:"gematrias"`
-	JPEG             JPEG                `json:"jpeg"`
-	PNG              PNG                 `json:"png"`
+	Identifier       string      `json:"identifier"`
+	RecordIdentifier string      `json:"record_identifier"`
+	PageNumber       int         `json:"page_number"`
+	PDFPath          string      `json:"pdf_path"`
+	PagesDir         string      `json:"pages_dir"`
+	OCRTextPath      string      `json:"ocr_text_path"`
+	ManifestPath     string      `json:"manifest_path"`
+	Language         string      `json:"language"`
+	Cryptonyms       []string    `json:"cryptonyms"`
+	Dates            []time.Time `json:"dates"`
+	JPEG             JPEG        `json:"jpeg"`
+	PNG              PNG         `json:"png"`
 }
 
 type Images struct {
@@ -300,23 +307,3 @@ type Qbit struct {
 
 type CtxKey string
 type CallbackFunc func(ctx context.Context, row []Column) error
-
-type GemCodeMap map[string]uint
-
-type GemScore struct {
-	Jewish  uint
-	English uint
-	Simple  uint
-}
-
-type Gematria struct {
-	Word  string   `json:"word"`
-	Score GemScore `json:"score"`
-}
-
-type WordResult struct {
-	Word     string   `json:"word"`
-	Language string   `json:"language"`
-	Gematria Gematria `json:"gematria"`
-	Quantity int      `json:"quantity"`
-}

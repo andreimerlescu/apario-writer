@@ -51,9 +51,6 @@ import (
 )
 
 func fileHasData(filename string) (bool, error) {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	sem_filedata.Acquire()
 	defer sem_filedata.Release()
 
@@ -83,9 +80,6 @@ func fileHasData(filename string) (bool, error) {
 }
 
 func parseDateString(in string) (out time.Time, err error) {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	possibleFormats := []string{
 		"01-02-06",
 		"01/02/2006",
@@ -105,9 +99,6 @@ func parseDateString(in string) (out time.Time, err error) {
 }
 
 func compressString(input []byte) ([]byte, error) {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	var buf bytes.Buffer
 	gzipWriter := gzip.NewWriter(&buf)
 
@@ -125,9 +116,6 @@ func compressString(input []byte) ([]byte, error) {
 }
 
 func decompressString(input []byte) ([]byte, error) {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	buf := bytes.NewBuffer(input)
 	gzipReader, err := gzip.NewReader(buf)
 	if err != nil {
@@ -144,9 +132,6 @@ func decompressString(input []byte) ([]byte, error) {
 }
 
 func generateThreeCharSequences(input string) []Qbit {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	qbitMap := make(map[[3]byte]int)
 
 	for i := 0; i < len(input)-2; i++ {
@@ -171,9 +156,6 @@ func generateThreeCharSequences(input string) []Qbit {
 }
 
 func IsDir(in string) bool {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	fileInfo, err := os.Stat(in)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -186,9 +168,6 @@ func IsDir(in string) bool {
 }
 
 func FileSha512(file *os.File) (checksum string) {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	sem_shafile.Acquire()
 	defer sem_shafile.Release()
 
@@ -202,9 +181,6 @@ func FileSha512(file *os.File) (checksum string) {
 }
 
 func cryptoRandInt(min, max int) (int, error) {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	if min > max {
 		return 0, errors.New("invalid range")
 	}
@@ -221,9 +197,6 @@ func cryptoRandInt(min, max int) (int, error) {
 }
 
 func downloadFile(ctx context.Context, url string, output string) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	var err error
 	for i := 0; i < c_retry_attempts; i++ {
 		err = tryDownloadFile(ctx, url, output)
@@ -249,9 +222,6 @@ func downloadFile(ctx context.Context, url string, output string) error {
 }
 
 func tryDownloadFile(ctx context.Context, url string, output string) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	sem_download.Acquire()
 	defer sem_download.Release()
 
@@ -286,9 +256,6 @@ func Sha256(in string) (checksum string) {
 }
 
 func resizePng(imgFile *os.File, newWidth int, outputFilename string) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	sem_resize.Acquire()
 	defer sem_resize.Release()
 
@@ -329,9 +296,6 @@ func resizePng(imgFile *os.File, newWidth int, outputFilename string) error {
 }
 
 func resizeJpg(imgFile *os.File, newWidth int, outputFilename string) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	sem_resize.Acquire()
 	defer sem_resize.Release()
 
@@ -376,9 +340,6 @@ func resizeJpg(imgFile *os.File, newWidth int, outputFilename string) error {
 }
 
 func convertAndOptimizePNG(imgFile *os.File, outputFilename string) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	sem_png2jpg.Acquire()
 	defer sem_png2jpg.Release()
 
@@ -417,9 +378,6 @@ func convertAndOptimizePNG(imgFile *os.File, outputFilename string) error {
 }
 
 func palettedToRGBA(src *image.Paletted) *image.RGBA {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	b := src.Bounds()
 	dst := image.NewRGBA(b)
 
@@ -433,9 +391,6 @@ func palettedToRGBA(src *image.Paletted) *image.RGBA {
 }
 
 func palettedToYCbCr(src *image.Paletted) *image.YCbCr {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	b := src.Bounds()
 	dst := image.NewYCbCr(b, image.YCbCrSubsampleRatio444)
 
@@ -456,9 +411,6 @@ func palettedToYCbCr(src *image.Paletted) *image.YCbCr {
 }
 
 func rgba64ToRGBA(src *image.RGBA64) *image.RGBA {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	b := src.Bounds()
 	dst := image.NewRGBA(b)
 
@@ -479,8 +431,6 @@ func rgba64ToRGBA(src *image.RGBA64) *image.RGBA {
 }
 
 func overlayImages(jpgFile, pngFile *os.File, outputFilename string) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
 	sema_watermark.Acquire()
 	defer sema_watermark.Release()
 	jpgFile.Seek(0, 0)
@@ -537,9 +487,6 @@ func overlayImages(jpgFile, pngFile *os.File, outputFilename string) error {
 // It is used to calculate distances between two points in a 2D or 3D space, and it is a key component of many machine
 // learning algorithms and computer vision applications.
 func colorDistance(c1, c2 color.Color) uint64 {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	r1, g1, b1, _ := c1.RGBA()
 	r2, g2, b2, _ := c2.RGBA()
 
@@ -551,8 +498,6 @@ func colorDistance(c1, c2 color.Color) uint64 {
 }
 
 func ConvertToDarkMode(img *os.File, directory, outputFilename string) (*os.File, error) {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
 	sem_darkimage.Acquire()
 	defer sem_darkimage.Release()
 	img.Seek(0, 0)
@@ -595,8 +540,6 @@ func ConvertToDarkMode(img *os.File, directory, outputFilename string) (*os.File
 }
 
 func verifyBinaries(binaries []string) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
 	for _, binary := range binaries {
 		if runtime.GOOS == "windows" {
 			binary += ".exe"
@@ -621,8 +564,6 @@ func verifyBinaries(binaries []string) error {
 }
 
 func DirHasPDFs(dirname string) (bool, error) {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
 	f, err := os.Open(dirname)
 	if err != nil {
 		return false, err
@@ -644,8 +585,6 @@ func DirHasPDFs(dirname string) (bool, error) {
 }
 
 func checkIfExecutable(path string) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("binary does not exist")
@@ -659,8 +598,6 @@ func checkIfExecutable(path string) error {
 }
 
 func NewIdentifier(length int) string {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
 	for {
 		identifier := make([]byte, length)
 		for i := range identifier {
@@ -689,9 +626,6 @@ func NewIdentifier(length int) string {
 }
 
 func WritePendingPageToJson(pp PendingPage) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
-
 	sem_wjsonfile.Acquire()
 	defer sem_wjsonfile.Release()
 
@@ -711,8 +645,6 @@ func WritePendingPageToJson(pp PendingPage) error {
 }
 
 func WriteResultDataToJson(rd ResultData) error {
-	wg_active_tasks.Add(1)
-	defer wg_active_tasks.Done()
 	sem_wjsonfile.Acquire()
 	defer sem_wjsonfile.Release()
 	file, err := os.OpenFile(rd.RecordPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)

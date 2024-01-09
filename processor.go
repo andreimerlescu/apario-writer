@@ -121,7 +121,8 @@ func process_download_pdf(ctx context.Context, filename string) error {
 	if !strings.HasPrefix(source_url, "http") {
 		if len(source_url) > 0 {
 			// has a value, but it doesnt begin with http
-			log.Printf("ERROR: --download-pdf-url doesn't begin with http but has a value of %v", source_url)
+			log.Printf("invalid source_url provided %v", source_url)
+			return fmt.Errorf("ERROR: --download-pdf-url doesn't begin with http but has a value of %v", source_url)
 		}
 	}
 
@@ -132,11 +133,13 @@ func process_download_pdf(ctx context.Context, filename string) error {
 	recordDir := filepath.Join(*flag_s_database_directory, pdf_url_checksum)
 	err := os.MkdirAll(recordDir, 0750)
 	if err != nil {
+		log.Printf("cannot mkdir -p %v due to err %v", recordDir, err)
 		return err
 	}
 
+	basename := filepath.Base(filename)
 	var (
-		q_file_pdf       = filepath.Join(recordDir, strings.ReplaceAll(filename, `/`, `_`))
+		q_file_pdf       = filepath.Join(recordDir, strings.ReplaceAll(basename, `/`, `_`))
 		q_file_ocr       = filepath.Join(recordDir, "ocr.txt")
 		q_file_extracted = filepath.Join(recordDir, "extracted.txt")
 		q_file_record    = filepath.Join(recordDir, "record.json")
@@ -147,27 +150,48 @@ func process_download_pdf(ctx context.Context, filename string) error {
 		log.Printf("downloading URL %v to %v", source_url, q_file_pdf)
 		err = downloadFile(ctx, source_url, q_file_pdf)
 		if err != nil {
+			log.Printf("received an error while downloading the file")
 			return err
 		}
 	}
 
 	// [-TO-DO-]: first the downloaded file must be scanned through a virus scanner, this will introduce a runtime requirement release process update
 	// TODO: ensure clamav is installed via the release upgrade script
-	output, action_taken, clamav_scan_err := scan_path_with_clam_av(q_file_pdf)
-	if clamav_scan_err != nil {
-		return clamav_scan_err
-	}
+	if !*flag_b_disable_clamav {
+		output, action_taken, clamav_scan_err := scan_path_with_clam_av(q_file_pdf)
+		if clamav_scan_err != nil {
+			log.Printf("while scanning %v clamav scan returned an err: %v", q_file_pdf, clamav_scan_err)
+			return clamav_scan_err
+		}
 
-	if action_taken {
-		log.Printf("action taken against %v with clamav: %v", q_file_pdf, output)
-		return fmt.Errorf("antivirus action taken against %v", q_file_pdf)
+		if action_taken {
+			log.Printf("action taken against %v with clamav: %v", q_file_pdf, output)
+			return fmt.Errorf("antivirus action taken against %v", q_file_pdf)
+		}
 	}
 
 	// [-TO-DO-]: analyze the metadata of the pdf file to determine totalPages, currently defaulting to 0
-	pageCount, containsText, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
+	pdf_analysis, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
 	if pdf_analysis_err != nil {
-		fmt.Println("Error:", err)
+		log.Printf("received an err %v on pdf_analysis for %v", err, q_file_pdf)
 		return pdf_analysis_err
+	}
+
+	var info *PDFCPUInfoResponseInfo
+	if len(pdf_analysis.Infos) > 0 {
+		data := pdf_analysis.Infos[0] // capture
+		info = &data                  // point
+	}
+
+	var embedded_text string
+	if info != nil {
+		if info.Pages > 0 {
+			a_i_total_pages.Add(int64(info.Pages))
+		}
+		if len(info.Keywords) > 0 {
+			embedded_text = strings.Join(info.Keywords, " ")
+			embedded_text = strings.ReplaceAll(embedded_text, "  ", " ")
+		}
 	}
 
 	pdfFile, pdfFileErr := os.Open(q_file_pdf) // [-TO-DO-]: need to add some security around this process
@@ -181,43 +205,57 @@ func process_download_pdf(ctx context.Context, filename string) error {
 	metadata_bytes := bytes.NewBufferString(*flag_s_pdf_metadata_json).Bytes()
 	err = json.Unmarshal(metadata_bytes, &metadata)
 	if err != nil {
-		return err
+		log.Printf("failed to parse the --metadata-json due to err %v", err)
 	}
 
-	var pdf_text string
-	var pdf_text_err error
-	if containsText {
-		pdf_text, pdf_text_err = extract_text_from_pdf(source_url)
-		if pdf_text_err != nil {
-			log.Printf("pdf_text_err = %v", pdf_text_err)
-		}
+	pdf_text, pdf_text_err := extract_text_from_pdf(q_file_pdf)
+	if pdf_text_err != nil {
+		log.Printf("pdf_text_err = %v", pdf_text_err)
+	}
 
-		if len(pdf_text) > 17 {
-			save_extracted_err := write_string_to_file(q_file_extracted, pdf_text)
-			if save_extracted_err != nil {
-				log.Printf("save_extracted_err = %v", save_extracted_err)
-			}
+	log.Printf("comparing pdf_text to embedded_text")
+
+	if len(embedded_text) > 17 {
+		save_extracted_err := write_string_to_file(q_file_extracted, embedded_text)
+		if save_extracted_err != nil {
+			log.Printf("save_extracted_err = %v", save_extracted_err)
+		}
+		info.Keywords = []string{} // flush memory
+	} else if len(pdf_text) > 17 {
+		save_extracted_err := write_string_to_file(q_file_extracted, pdf_text)
+		if save_extracted_err != nil {
+			log.Printf("save_extracted_err = %v", save_extracted_err)
 		}
 	}
-	pdf_text = "" // flush the data out, its not needed any longer
 
 	rd := ResultData{
 		Identifier:        identifier,
 		URL:               source_url,
 		DataDir:           recordDir,
-		TotalPages:        int64(pageCount),
+		TotalPages:        int64(info.Pages),
+		URLChecksum:       pdf_url_checksum,
 		PDFChecksum:       checksum,
 		PDFPath:           q_file_pdf,
 		OCRTextPath:       q_file_ocr,
 		ExtractedTextPath: q_file_extracted,
 		RecordPath:        q_file_record,
+		Info:              *info,
 		Metadata:          metadata,
 	}
 	err = WriteResultDataToJson(rd)
 	if err != nil {
 		return err
 	}
-	sm_documents.Store(identifier, rd)
+	sm_resultdatas.Store(identifier, rd)
+	sm_documents.Store(identifier, Document{
+		Identifier:          identifier,
+		URL:                 source_url,
+		Pages:               make(map[int64]Page),
+		TotalPages:          int64(info.Pages),
+		CoverPageIdentifier: "",
+		Collection:          Collection{},
+	})
+	a_i_total_documents.Add(1)
 	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
 	err = ch_ImportedRow.Write(rd)
 	if err != nil {
@@ -294,32 +332,20 @@ func extract_text_from_pdf(path string) (string, error) {
 }
 
 // analyze_pdf_path uses the `pdfcpu` utility to determine properties about a PDF file.
-func analyze_pdf_path(path string) (int, bool, error) {
-	cmd := exec.Command("pdfcpu", "validate", "-verbose", path)
+func analyze_pdf_path(path string) (PDFCPUInfoResponse, error) {
+	cmd := exec.Command("pdfcpu", "info", "-json", path)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
 	if err != nil {
-		return 0, false, err
+		return PDFCPUInfoResponse{}, err
 	}
-	output := out.String()
-	pageCount := 0
-	containsText := false
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "pages:") {
-			// Extract page count from the line
-			_, err := fmt.Sscanf(line, "pages: %d", &pageCount)
-			if err != nil {
-				return 0, false, err
-			}
-		}
-		if strings.Contains(line, "fonts:") {
-			containsText = true
-		}
+	var pdf_info PDFCPUInfoResponse
+	pdf_info_err := json.Unmarshal(out.Bytes(), &pdf_info)
+	if pdf_info_err != nil {
+		return PDFCPUInfoResponse{}, pdf_info_err
 	}
-
-	return pageCount, containsText, nil
+	return pdf_info, nil
 }
 
 func ProcessRow(headerFields []string, rowFields []string, rowWg *sync.WaitGroup, row chan []Column) {
@@ -342,7 +368,7 @@ func ProcessRow(headerFields []string, rowFields []string, rowWg *sync.WaitGroup
 			}
 		}
 	}
-	var rowData = []Column{}
+	var rowData []Column
 	if len(d) > 0 {
 		for h, v := range d {
 			rowData = append(rowData, Column{Header: h, Value: v})
@@ -374,6 +400,7 @@ func ReceiveRows(ctx context.Context, row chan []Column, filename string, callba
 				return
 			}
 			ctx := context.WithValue(ctx, CtxKey("csv_file"), filename)
+			a_i_total_documents.Add(1)
 			callbackErr := callback(ctx, populatedRow)
 			if callbackErr != nil {
 				log.Printf("failed to insert row %v with error %v", populatedRow, callbackErr)

@@ -30,11 +30,6 @@ import (
 )
 
 func validatePdf(ctx context.Context, record ResultData) (ResultData, error) {
-	wg_active_tasks.Add(3)
-	// 1 - validatePdf - done
-	// 2 - extractPlainTextFromPdf - done
-	// 3 - extractPagesFromPdf - done
-	defer wg_active_tasks.Done()
 	log.Printf("started validatePdf(%v) = %v", record.Identifier, record.PDFPath)
 
 	_, rjsonErr := os.Stat(record.RecordPath)
@@ -95,7 +90,6 @@ func validatePdf(ctx context.Context, record ResultData) (ResultData, error) {
 func extractPlainTextFromPdf(ctx context.Context, record ResultData) {
 	defer func() {
 		log.Printf("finished extracting the text from the PDF %v, now sending rd into ch_ExtractPages", filepath.Base(record.PDFPath))
-		wg_active_tasks.Done()
 		if ch_ExtractPages.CanWrite() {
 			err := ch_ExtractPages.Write(record)
 			if err != nil {
@@ -108,23 +102,22 @@ func extractPlainTextFromPdf(ctx context.Context, record ResultData) {
 		/*
 			pdftotext REPLACE_WITH_FILE_PATH REPLACE_WITH_TEXT_OUTPUT_FILE_PATH
 		*/
-		cmd4_extract_text_pdf := exec.Command(m_required_binaries["pdftotext"], record.PDFPath, record.ExtractedTextPath)
+		cmd_extract_text_pdf := exec.Command(m_required_binaries["pdftotext"], record.PDFPath, record.ExtractedTextPath)
 		var cmd4_extract_text_pdf_stdout bytes.Buffer
 		var cmd4_extract_text_pdf_stderr bytes.Buffer
-		cmd4_extract_text_pdf.Stdout = &cmd4_extract_text_pdf_stdout
-		cmd4_extract_text_pdf.Stderr = &cmd4_extract_text_pdf_stderr
+		cmd_extract_text_pdf.Stdout = &cmd4_extract_text_pdf_stdout
+		cmd_extract_text_pdf.Stderr = &cmd4_extract_text_pdf_stderr
 		sem_pdftotext.Acquire()
-		cmd4_extract_text_pdf_err := cmd4_extract_text_pdf.Run()
+		cmd_extract_text_pdf_err := cmd_extract_text_pdf.Run()
 		sem_pdftotext.Release()
-		if cmd4_extract_text_pdf_err != nil {
-			log.Printf("Failed to execute command `pdftotext %v %v` due to error: %s\n", record.PDFPath, record.ExtractedTextPath, cmd4_extract_text_pdf_err)
+		if cmd_extract_text_pdf_err != nil {
+			log.Printf("Failed to execute command `pdftotext %v %v` due to error: %s\n", record.PDFPath, record.ExtractedTextPath, cmd_extract_text_pdf_err)
 			return
 		}
 	}
 }
 
 func extractPagesFromPdf(ctx context.Context, record ResultData) {
-	defer wg_active_tasks.Done()
 	log.Printf("started extractPagesFromPdf(%v) = %v", record.Identifier, record.PDFPath)
 	/*
 		pdfcpu extract -mode page REPLACE_WITH_FILE_PATH REPLACE_WITH_OUTPUT_DIRECTORY
@@ -147,16 +140,16 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 			log.Printf("failed to create directory %v due to error %v", pagesDir, pagesDirErr)
 			return
 		}
-		cmd5_extract_pages_in_pdf := exec.Command(m_required_binaries["pdfcpu"], "extract", "-mode", "page", record.PDFPath, pagesDir)
-		var cmd5_extract_pages_in_pdf_stdout bytes.Buffer
-		var cmd5_extract_pages_in_pdf_stderr bytes.Buffer
-		cmd5_extract_pages_in_pdf.Stdout = &cmd5_extract_pages_in_pdf_stdout
-		cmd5_extract_pages_in_pdf.Stderr = &cmd5_extract_pages_in_pdf_stderr
+		cmd_extract_pages_in_pdf := exec.Command(m_required_binaries["pdfcpu"], "extract", "-mode", "page", record.PDFPath, pagesDir)
+		var cmd_extract_pages_in_pdf_stdout bytes.Buffer
+		var cmd_extract_pages_in_pdf_stderr bytes.Buffer
+		cmd_extract_pages_in_pdf.Stdout = &cmd_extract_pages_in_pdf_stdout
+		cmd_extract_pages_in_pdf.Stderr = &cmd_extract_pages_in_pdf_stderr
 		sem_pdfcpu.Acquire()
-		cmd5_extract_pages_in_pdf_err := cmd5_extract_pages_in_pdf.Run()
+		cmd_extract_pages_in_pdf_err := cmd_extract_pages_in_pdf.Run()
 		sem_pdfcpu.Release()
-		if cmd5_extract_pages_in_pdf_err != nil {
-			log.Printf("Failed to execute command `pdfcpu extract -mode page %v %v` due to error: %s\n", record.PDFPath, pagesDir, cmd5_extract_pages_in_pdf_err)
+		if cmd_extract_pages_in_pdf_err != nil {
+			log.Printf("Failed to execute command `pdfcpu extract -mode page %v %v` due to error: %s\n", record.PDFPath, pagesDir, cmd_extract_pages_in_pdf_err)
 			return
 		}
 	} else {
@@ -227,18 +220,6 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 				return err
 			}
 			log.Printf("sending page %d (ID %v) from record %v URL %v into the ch_GeneratingPng", pgNo, identifier, record.Identifier, record.URL)
-			wg_active_tasks.Add(10)
-			// 01 - convertPageToPng - done = in the event of a failure, this func will call wg_active_tasks.Done() 9 times
-			// 02 - generateLightThumbnails - done
-			// 03 - generateDarkThumbnails - done
-			// 04 - performOcrOnPdf - done
-			// 05 - convertPngToJpg - done
-			// 06 - analyze_StartOnFullText - done
-			// 07 - analyzeCryptonyms - done
-			// 08 - analyzeLocations - done
-			// 09 - analyzeGematria - done
-			// 10 - analyzeWordIndexer - done
-
 			if ch_GeneratePng.CanWrite() {
 				err := ch_GeneratePng.Write(pp)
 				if err != nil {
@@ -260,7 +241,6 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 }
 
 func convertPageToPng(ctx context.Context, pp PendingPage) {
-	defer wg_active_tasks.Done()
 	log.Printf("started convertPageToPng(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 	/*
 		pdf_to_png: "pdftoppm REPLACE_WITH_PNG_OPTS REPLACE_WITH_FILE_PATH REPLACE_WITH_PNG_PATH",
@@ -280,18 +260,12 @@ func convertPageToPng(ctx context.Context, pp PendingPage) {
 		sem_pdftoppm.Release()
 		if cmd_err != nil {
 			log.Printf("failed to convert page %v to png %v due to error: %s\n", filepath.Base(pp.PDFPath), pp.PNG.Light.Original, cmd_err)
-			for i := 1; i <= 9; i++ {
-				wg_active_tasks.Done()
-			}
 			return
 		}
 
 		pngRenameErr := os.Rename(fmt.Sprintf("%v-1.png", originalFilename), fmt.Sprintf("%v.png", originalFilename))
 		if pngRenameErr != nil {
 			log.Printf("failed to rename the jpg %v due to error: %v", originalFilename, pngRenameErr)
-			for i := 1; i <= 9; i++ {
-				wg_active_tasks.Done()
-			}
 			return
 		}
 	}
@@ -308,7 +282,6 @@ func convertPageToPng(ctx context.Context, pp PendingPage) {
 }
 
 func generateLightThumbnails(ctx context.Context, pp PendingPage) {
-	defer wg_active_tasks.Done()
 	defer func() {
 		log.Printf("completed generateLightThumbnails now sending %v (%v.%v) -> ch_GenerateDark ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 		if ch_GenerateDark.CanWrite() {
@@ -360,7 +333,6 @@ func generateLightThumbnails(ctx context.Context, pp PendingPage) {
 }
 
 func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
-	defer wg_active_tasks.Done()
 	defer func() {
 		log.Printf("completed generateDarkThumbnails now sending %v (%v.%v) -> ch_PerformOcr ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 		if ch_PerformOcr.CanWrite() {
@@ -444,7 +416,6 @@ func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
 }
 
 func performOcrOnPdf(ctx context.Context, pp PendingPage) {
-	defer wg_active_tasks.Done()
 	defer func() {
 		log.Printf("completed performOcrOnPdf now sending %v (%v.%v) -> ch_ConvertToJpg ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 		if ch_ConvertToJpg.CanWrite() {
@@ -487,7 +458,6 @@ func performOcrOnPdf(ctx context.Context, pp PendingPage) {
 }
 
 func convertPngToJpg(ctx context.Context, pp PendingPage) {
-	defer wg_active_tasks.Done()
 	defer func() {
 		log.Printf("completed convertPngToJpg now sending %v (%v.%v) -> ch_CompletedPage ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 		if ch_AnalyzeText.CanWrite() {
@@ -531,5 +501,15 @@ func convertPngToJpg(ctx context.Context, pp PendingPage) {
 			}
 		}
 	}
+
+}
+
+// compileDarkPDF TODO: need to implement this so page.dark.######.original.jpg can be combined into <filename>.dark.pdf
+func compileDarkPDF() {
+
+}
+
+// generateSocialCard TODO: need to implement creating the social image card for X/Facebook/etc. when links are shared
+func generateSocialCard() {
 
 }

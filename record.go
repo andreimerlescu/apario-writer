@@ -180,76 +180,20 @@ func processRecord(ctx context.Context, row []Column) error {
 	if err != nil {
 		return err
 	}
-	sm_documents.Store(identifier, rd)
+	sm_resultdatas.Store(identifier, rd)
+	sm_documents.Store(identifier, Document{
+		Identifier:          identifier,
+		URL:                 source_url,
+		Pages:               make(map[int64]Page),
+		TotalPages:          int64(totalPages),
+		CoverPageIdentifier: "",
+		Collection:          Collection{},
+	})
 	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
 	err = ch_ImportedRow.Write(rd)
 	if err != nil {
 		log.Printf("cant write to ch_ImportedRow")
 		return err
 	}
-	return nil
-}
-
-func processLocation(ctx context.Context, row []Column) error {
-	var (
-		countryName, countryCode, continent, stateProvinceName, cityName string
-		latitude, longitude                                              float64
-		intConversionErr, floatConversionErr                             error
-	)
-	for _, column := range row {
-		switch column.Header {
-		case "countryname":
-			countryName = column.Value
-		case "countrycode":
-			countryCode = column.Value
-		case "Continent":
-			continent = column.Value
-		case "StateProvinceName":
-			stateProvinceName = column.Value
-		case "cityname":
-			cityName = column.Value
-		case "latitude":
-			if len(column.Value) > 0 {
-				latitude, floatConversionErr = strconv.ParseFloat(column.Value, 32)
-			}
-		case "longitude":
-			if len(column.Value) > 0 {
-				longitude, floatConversionErr = strconv.ParseFloat(column.Value, 32)
-			}
-		}
-	}
-
-	if intConversionErr != nil {
-		log.Fatalf("failed to convert int: %v", intConversionErr)
-	}
-
-	if floatConversionErr != nil {
-		log.Fatalf("failed to convert float: %v", floatConversionErr)
-	}
-
-	location := &Location{
-		Continent:   continent,
-		Country:     countryName,
-		CountryCode: countryCode,
-		City:        cityName,
-		State:       stateProvinceName,
-		Longitude:   longitude,
-		Latitude:    latitude,
-	}
-
-	cityName = strings.ToLower(cityName)
-	mu_location_cities.Lock()
-	m_location_cities = append(m_location_cities, location)
-	mu_location_cities.Unlock()
-
-	countryName = strings.ToLower(countryName)
-	mu_location_countries.Lock()
-	m_location_countries = append(m_location_countries, location)
-	mu_location_countries.Unlock()
-
-	stateProvinceName = strings.ToLower(stateProvinceName)
-	mu_location_states.Lock()
-	m_location_states = append(m_location_states, location)
-	mu_location_states.Unlock()
 	return nil
 }

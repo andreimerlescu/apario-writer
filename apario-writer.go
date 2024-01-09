@@ -53,7 +53,13 @@ func main() {
 		log.Fatalf("failed to parse config file: %v", configErr)
 	}
 
-	binaryErr := verifyBinaries(sl_required_binaries)
+	var binaryErr error
+	if *flag_b_disable_clamav {
+		binaryErr = verifyBinaries(sl_required_binaries_no_clam)
+	} else {
+		binaryErr = verifyBinaries(sl_required_binaries)
+	}
+
 	if binaryErr != nil {
 		fmt.Printf("Error: %s\n", binaryErr)
 		os.Exit(1)
@@ -65,7 +71,7 @@ func main() {
 	}
 
 	dir_current_directory = filepath.Dir(ex)
-	fmt.Sprintf("Current Working Directory: %s\n", dir_current_directory)
+	_ = fmt.Sprintf("Current Working Directory: %s\n", dir_current_directory)
 
 	if *flag_s_download_pdf_url == "" && *flag_s_import_pdf_path == "" &&
 		*flag_s_import_directory == "" /* && *flag_s_import_xlsx == "" && *flag_s_import_csv == "" */ {
@@ -96,65 +102,19 @@ func main() {
 		reader_buffer_bytes = *flag_i_buffer
 	}
 
+	// Use a configurable to send logs to a specific file
 	logFile, logFileErr := os.OpenFile(*flag_g_log_file, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0666)
 	if logFileErr != nil {
 		log.Fatal("Failed to open log file: ", logFileErr)
 	}
-	log.SetOutput(logFile)
+	log.SetOutput(logFile) // redirect log.* to the log file versus fmt to STDOUT
 
+	// interrupt Ctrl+C and other SIGINT/SIGTERM/SIGKILL related signals to the application to quit gracefully
 	watchdog := make(chan os.Signal, 1)
 	signal.Notify(watchdog, os.Kill, syscall.SIGTERM, os.Interrupt)
-	go func() {
-		<-watchdog
-		err := logFile.Close()
-		if err != nil {
-			log.Printf("failed to close the logFile due to error: %v", err)
-		}
-		cancel()
+	go receive_watchdog_signal(watchdog, logFile, cancel)
 
-		wg_active_tasks.PreventAdd()
-
-		ch_ImportedRow.Close()       // step 01
-		ch_ExtractText.Close()       // step 02
-		ch_ExtractPages.Close()      // step 03
-		ch_GeneratePng.Close()       // step 04
-		ch_GenerateLight.Close()     // step 05
-		ch_GenerateDark.Close()      // step 06
-		ch_ConvertToJpg.Close()      // step 07
-		ch_PerformOcr.Close()        // step 08
-		ch_AnalyzeText.Close()       // step 09
-		ch_AnalyzeCryptonyms.Close() // step 10
-		ch_AnalyzeLocations.Close()  // step 11
-		ch_AnalyzeGematria.Close()   // step 12
-		ch_AnalyzeDictionary.Close() // step 13
-		ch_CompletedPage.Close()     // step 14
-		ch_CompiledDocument.Close()  // step 15
-
-		fmt.Printf("Completed running in %d", time.Since(startedAt))
-
-		var cmd *exec.Cmd
-		switch runtime.GOOS {
-		case "windows":
-			cmd = exec.Command("tasklist", "/FI", "IMAGENAME eq apario-writer.exe")
-		default:
-			cmd = exec.Command("pgrep", "apario-writer")
-		}
-
-		output, err := cmd.Output()
-		if err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-
-		pids := parsePIDs(string(output))
-
-		for _, pid := range pids {
-			terminatePID(pid)
-		}
-
-		os.Exit(0)
-	}()
-
+	// process/analyze the cryptonyms from the bundled assets
 	cryptonymFile, cryptonymFileErr := fs_references.ReadFile(filepath.Join("bundled", "reference", "cryptonyms.json"))
 	if cryptonymFileErr != nil {
 		log.Printf("failed to parse cryptonyms.json file from the data directory due to error: %v", cryptonymFileErr)
@@ -177,22 +137,17 @@ func main() {
 		flag.Usage()
 		log.Printf("Cannot use --download-pdf-url with --import-pdf-path.")
 		os.Exit(1)
-	}
-
-	if *flag_s_download_pdf_url != "" && *flag_s_import_directory != "" {
+	} else if *flag_s_download_pdf_url != "" && *flag_s_import_directory != "" {
 		flag.Usage()
 		log.Printf("Cannot use --download-pdf-url with --import-directory.")
 		os.Exit(1)
-	}
-
-	if *flag_s_import_pdf_path != "" && *flag_s_import_directory != "" {
+	} else if *flag_s_import_pdf_path != "" && *flag_s_import_directory != "" {
 		flag.Usage()
 		log.Printf("Cannot use --import-pdf-path with --import-directory.")
 		os.Exit(1)
-	}
+	} // TODO: add the xlsx and csv options
 
-	// TODO: add the xlsx and csv options
-
+	// store the filename of what is being processed into a variable
 	filename := *flag_s_download_pdf_url // default
 	if *flag_s_import_pdf_path != "" {
 		filename = *flag_s_import_pdf_path
@@ -203,34 +158,38 @@ func main() {
 
 	// TODO: add conditionals for filename for xlsx and csv options
 
+	// attach the filename to the context so it can be observed from within the goroutines of the main processor
 	ctx = context.WithValue(ctx, CtxKey("filename"), filename)
 
-	go receiveImportedRow(ctx, ch_ImportedRow.Chan())             // step 01 - runs validatePdf before sending into ch_ExtractText
-	go receiveOnExtractTextCh(ctx, ch_ExtractText.Chan())         // step 02 - runs extractPlainTextFromPdf before sending into ch_ExtractPages
-	go receiveOnExtractPagesCh(ctx, ch_ExtractPages.Chan())       // step 03 - runs extractPagesFromPdf before sending PendingPage into ch_GeneratePng
-	go receiveOnGeneratePngCh(ctx, ch_GeneratePng.Chan())         // step 04 - runs convertPageToPng before sending PendingPage into ch_GenerateLight
-	go receiveOnGenerateLightCh(ctx, ch_GenerateLight.Chan())     // step 05 - runs generateLightThumbnails before sending PendingPage into ch_GenerateDark
-	go receiveOnGenerateDarkCh(ctx, ch_GenerateDark.Chan())       // step 06 - runs generateDarkThumbnails before sending PendingPage into ch_ConvertToJpg
-	go receiveOnConvertToJpg(ctx, ch_ConvertToJpg.Chan())         // step 07 - runs convertPngToJpg before sending PendingPage into ch_PerformOcr
-	go receiveOnPerformOcrCh(ctx, ch_PerformOcr.Chan())           // step 08 - runs performOcrOnPdf before sending PendingPage into ch_AnalyzeText
-	go receiveFullTextToAnalyze(ctx, ch_AnalyzeText.Chan())       // step 09 - runs analyze_StartOnFullText before sending PendingPage into ch_AnalyzeCryptonyms
-	go receiveAnalyzeCryptonym(ctx, ch_AnalyzeCryptonyms.Chan())  // step 10 - runs analyzeCryptonyms before sending PendingPage into ch_AnalyzeLocations
-	go receiveAnalyzeLocations(ctx, ch_AnalyzeLocations.Chan())   // step 11 - runs analyzeLocations before sending PendingPage into ch_AnalyzeGematria
-	go receiveAnalyzeGematria(ctx, ch_AnalyzeGematria.Chan())     // step 12 - runs analyzeGematria before sending PendingPage into ch_AnalyzeDictionary
-	go receiveAnalyzeDictionary(ctx, ch_AnalyzeDictionary.Chan()) // step 13 - runs analyzeWordIndexer before sending PendingPage into ch_CompletedPage
-	go receiveCompletedPendingPage(ctx, ch_CompletedPage.Chan())  // step 14 - compiles a final result of a Document before sending it into ch_CompiledDocument
-	go receiveCompiledDocument(ctx, ch_CompiledDocument.Chan())   // step 15 - compiles the SQL insert statements for the Document
+	// start a bunch of receiver functions to handle when data is ready to be processed
+	// each of these functions are like black boxes that ONE PAGE from a document is ingested into until it reaches the end
+	go receiveImportedRow(ctx, ch_ImportedRow.Chan())            // step 01 - runs validatePdf before sending into ch_ExtractText
+	go receiveOnExtractTextCh(ctx, ch_ExtractText.Chan())        // step 02 - runs extractPlainTextFromPdf before sending into ch_ExtractPages
+	go receiveOnExtractPagesCh(ctx, ch_ExtractPages.Chan())      // step 03 - runs extractPagesFromPdf before sending PendingPage into ch_GeneratePng
+	go receiveOnGeneratePngCh(ctx, ch_GeneratePng.Chan())        // step 04 - runs convertPageToPng before sending PendingPage into ch_GenerateLight
+	go receiveOnGenerateLightCh(ctx, ch_GenerateLight.Chan())    // step 05 - runs generateLightThumbnails before sending PendingPage into ch_GenerateDark
+	go receiveOnGenerateDarkCh(ctx, ch_GenerateDark.Chan())      // step 06 - runs generateDarkThumbnails before sending PendingPage into ch_ConvertToJpg
+	go receiveOnConvertToJpg(ctx, ch_ConvertToJpg.Chan())        // step 07 - runs convertPngToJpg before sending PendingPage into ch_PerformOcr
+	go receiveOnPerformOcrCh(ctx, ch_PerformOcr.Chan())          // step 08 - runs performOcrOnPdf before sending PendingPage into ch_AnalyzeText
+	go receiveFullTextToAnalyze(ctx, ch_AnalyzeText.Chan())      // step 09 - runs analyze_StartOnFullText before sending PendingPage into ch_AnalyzeCryptonyms
+	go receiveAnalyzeCryptonym(ctx, ch_AnalyzeCryptonyms.Chan()) // step 10 - runs analyzeCryptonyms before sending PendingPage into ch_CompletedPage
+	go receiveCompletedPendingPage(ctx, ch_CompletedPage.Chan()) // step 11 - performs a sanity check on the compilation
 
 	var importErr error
 	if *flag_s_download_pdf_url != "" {
+		log.Printf("process_download_pdf")
 		importErr = process_download_pdf(ctx, *flag_s_download_pdf_url)
 	} else if *flag_s_import_pdf_path != "" {
+		log.Printf("process_import_pdf")
 		importErr = process_import_pdf(ctx, *flag_s_import_pdf_path)
 	} else if *flag_s_import_directory != "" {
+		log.Printf("process_import_directory")
 		importErr = process_import_directory(ctx, *flag_s_import_directory)
 	} else if *flag_s_import_csv != "" {
+		log.Printf("process_import_csv")
 		importErr = process_import_csv(ctx, *flag_s_import_csv, processRecord)
 	} else if *flag_s_import_xlsx != "" {
+		log.Printf("process_import_xlsx")
 		importErr = process_import_xlsx(ctx, *flag_s_import_xlsx, processRecord)
 	} else {
 		panic("Improperly formatted configuration. No data to process.")
@@ -242,12 +201,12 @@ func main() {
 
 	defer logFile.Close()
 
-	wg_active_tasks.Wait()
-	ch_Done <- struct{}{}
-
 	for {
 		select {
 		case <-ctx.Done():
+			log.Printf("received a cancel on the context's done channel")
+			elapsed := time.Since(startedAt)
+			log.Printf("Completed task in %.0f seconds", elapsed.Seconds())
 			return
 		case <-ch_Done:
 			log.SetOutput(os.Stdout)
@@ -259,8 +218,60 @@ func main() {
 				if !ok {
 					log.Printf("cannot typecast the final result for %s as a .(Document)", d.Identifier)
 				}
-				log.Printf("Completed processing document %v", d.Identifier)
+				a_i_received_documents.Add(1)
+				log.Printf("a_i_total_documents == a_i_received_documents ; %d == %d", a_i_total_documents.Load(), a_i_received_documents.Load())
+
+				if a_i_total_documents.Load() == a_i_received_documents.Load() {
+					log.SetOutput(os.Stdout)
+					log.Printf("Completed processing document %v", d)
+					ch_Done <- struct{}{}
+				}
 			}
 		}
 	}
+}
+
+func receive_watchdog_signal(watchdog chan os.Signal, logFile *os.File, cancel context.CancelFunc) {
+	<-watchdog
+	err := logFile.Close()
+	if err != nil {
+		log.Printf("failed to close the logFile due to error: %v", err)
+	}
+	defer cancel()
+
+	ch_ImportedRow.Close()       // step 01
+	ch_ExtractText.Close()       // step 02
+	ch_ExtractPages.Close()      // step 03
+	ch_GeneratePng.Close()       // step 04
+	ch_GenerateLight.Close()     // step 05
+	ch_GenerateDark.Close()      // step 06
+	ch_ConvertToJpg.Close()      // step 07
+	ch_PerformOcr.Close()        // step 08
+	ch_AnalyzeText.Close()       // step 09
+	ch_AnalyzeCryptonyms.Close() // step 10
+	ch_CompletedPage.Close()     // step 11
+	ch_CompiledDocument.Close()  // step 12
+
+	fmt.Printf("Completed running in %d", time.Since(startedAt))
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("tasklist", "/FI", "IMAGENAME eq apario-writer.exe")
+	default:
+		cmd = exec.Command("pgrep", "apario-writer")
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	pids := parsePIDs(string(output))
+
+	for _, pid := range pids {
+		terminatePID(pid)
+	}
+
 }

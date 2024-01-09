@@ -19,7 +19,7 @@ apario-writer \
   --download-pdf-url "https://www.cia.gov/readingroom/docs/CIA-RDP96-00788R001500160012-7.pdf" \
   --database-directory "/idoread.com-data/stargate-tmp" \
   --pdf-title "STATEMENT BEFORE THE INVESTIGATIONS SUBCOMMITTEE HOUSE ARMED SERVICES" \
-  --pdf-metadata "{\"Collection\":\"STARGATE\",\"Released At\":\"2004-05-17\",\"Created At\":\"2016-11-04\"}" \
+  --metadata-json "{\"Collection\":\"STARGATE\",\"Released At\":\"2004-05-17\",\"Created At\":\"2016-11-04\"}" \
   --log "/var/log/idoread.com/apario-writer.log"
 ```
 

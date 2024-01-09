@@ -241,60 +241,6 @@ func receiveAnalyzeCryptonym(ctx context.Context, ch <-chan interface{}) {
 	}
 }
 
-func receiveAnalyzeLocations(ctx context.Context, ch <-chan interface{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ipp, ok := <-ch:
-			if ok {
-				pp, ok := ipp.(PendingPage)
-				if !ok {
-					log.Println("cant typecast ipp to .(PendingPage)")
-					return
-				}
-				go analyzeLocations(ctx, pp)
-			}
-		}
-	}
-}
-
-func receiveAnalyzeGematria(ctx context.Context, ch <-chan interface{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ipp, ok := <-ch:
-			if ok {
-				pp, ok := ipp.(PendingPage)
-				if !ok {
-					log.Println("cant typecast ipp to .(PendingPage)")
-					return
-				}
-				go analyzeGematria(ctx, pp)
-			}
-		}
-	}
-}
-
-func receiveAnalyzeDictionary(ctx context.Context, ch <-chan interface{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ipp, ok := <-ch:
-			if ok {
-				pp, ok := ipp.(PendingPage)
-				if !ok {
-					log.Println("cant typecast ipp to .(PendingPage)")
-					return
-				}
-				go analyzeWordIndexer(ctx, pp)
-			}
-		}
-	}
-}
-
 func receiveCompletedPendingPage(ctx context.Context, ch <-chan interface{}) {
 	for {
 		select {
@@ -308,24 +254,6 @@ func receiveCompletedPendingPage(ctx context.Context, ch <-chan interface{}) {
 					return
 				}
 				go aggregatePendingPage(ctx, pp)
-			}
-		}
-	}
-}
-
-func receiveCompiledDocument(ctx context.Context, ch <-chan interface{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case id, ok := <-ch:
-			if ok {
-				d, ok := id.(Document)
-				if !ok {
-					log.Println("cant typecast id into .(Document)")
-					return
-				}
-				go compileDocumentSql(ctx, d)
 			}
 		}
 	}
