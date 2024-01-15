@@ -74,10 +74,10 @@ func main() {
 	_ = fmt.Sprintf("Current Working Directory: %s\n", dir_current_directory)
 
 	if *flag_s_download_pdf_url == "" && *flag_s_import_pdf_path == "" &&
-		*flag_s_import_directory == "" /* && *flag_s_import_xlsx == "" && *flag_s_import_csv == "" */ {
+		*flag_s_import_directory == "" && *flag_s_import_csv == "" /* && *flag_s_import_xlsx == ""  */ {
 		flag.Usage()
-		log.Printf("You must use one --download-pdf-url / --import-pdf-path / --import-directory")
-		//log.Printf("You must use one --download-pdf-url / --import-pdf-path / --import-directory / --import-xlsx / --import-csv")
+		log.Printf("You must use one --download-pdf-url / --import-pdf-path / --import-directory / --import-csv")
+		//log.Printf("You must use one --download-pdf-url / --import-pdf-path / --import-directory / --import-csv / --import-xlsx")
 		os.Exit(1)
 	}
 
@@ -178,16 +178,16 @@ func main() {
 	var importErr error
 	if *flag_s_download_pdf_url != "" {
 		log.Printf("process_download_pdf")
-		importErr = process_download_pdf(ctx, *flag_s_download_pdf_url)
+		importErr = process_download_pdf(ctx, *flag_s_download_pdf_url, *flag_s_pdf_metadata_json)
 	} else if *flag_s_import_pdf_path != "" {
 		log.Printf("process_import_pdf")
-		importErr = process_import_pdf(ctx, *flag_s_import_pdf_path)
+		importErr = process_import_pdf(ctx, *flag_s_import_pdf_path, *flag_s_pdf_metadata_json)
 	} else if *flag_s_import_directory != "" {
 		log.Printf("process_import_directory")
 		importErr = process_import_directory(ctx, *flag_s_import_directory)
 	} else if *flag_s_import_csv != "" {
 		log.Printf("process_import_csv")
-		importErr = process_import_csv(ctx, *flag_s_import_csv, processRecord)
+		importErr = process_import_csv(ctx, *flag_s_import_csv, process_custom_csv_row)
 	} else if *flag_s_import_xlsx != "" {
 		log.Printf("process_import_xlsx")
 		importErr = process_import_xlsx(ctx, *flag_s_import_xlsx, processRecord)
@@ -199,7 +199,12 @@ func main() {
 		log.Printf("received an error from process_import_csv/process_import_xlsx namely: %v", importErr) // a problem habbened
 	}
 
-	defer logFile.Close()
+	defer func(logFile *os.File) {
+		err := logFile.Close()
+		if err != nil {
+			log.Printf("failed to close the logfile due to err: %v", err)
+		}
+	}(logFile)
 
 	for {
 		select {
@@ -233,6 +238,7 @@ func main() {
 
 func receive_watchdog_signal(watchdog chan os.Signal, logFile *os.File, cancel context.CancelFunc) {
 	<-watchdog
+	log.SetOutput(os.Stdout)
 	err := logFile.Close()
 	if err != nil {
 		log.Printf("failed to close the logFile due to error: %v", err)

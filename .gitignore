@@ -5,3 +5,10 @@ apario-writer
 apario-writer.exe
 stargate-tmp
 epstein
+elections
+dir-test-database
+*.tsv
+*.csv
+*.psv
+.DS_Store
+config.yaml

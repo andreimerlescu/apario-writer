@@ -4,6 +4,8 @@ github.com/andreimerlescu/go-countable-waitgroup v0.0.3 h1:xQH6KqhyE+3Dxmm1uAW+j
 github.com/andreimerlescu/go-countable-waitgroup v0.0.3/go.mod h1:bnjdLlK27r5U6IZSxRaPcyfgCMqZu/KO5LQNNdwF3aU=
 github.com/andreimerlescu/go-gematria v0.0.1 h1:aOaiS3FuSVXKUUacOxEyFexBklMyBku+rHUbwzKoODo=
 github.com/andreimerlescu/go-gematria v0.0.1/go.mod h1:QtP1M7h2S2ukGSPROgPMxcmkVlLvoSTlJBhrkbitbjM=
+github.com/andreimerlescu/go-gematria v0.0.2 h1:qCUkXzA03p1i/2A3dpPMgdE6Q5FrUVKXjhjkjolVMkI=
+github.com/andreimerlescu/go-gematria v0.0.2/go.mod h1:QtP1M7h2S2ukGSPROgPMxcmkVlLvoSTlJBhrkbitbjM=
 github.com/andreimerlescu/go-sema v0.0.1 h1:+PijxhpaJXDDApRGnOOln23Cddb68T9+wkJtKFMcTuc=
 github.com/andreimerlescu/go-sema v0.0.1/go.mod h1:m7krZFMBkrhm0P/4vVLoeeqQMv0m9sC4r9HfjLGxA7k=
 github.com/andreimerlescu/go-smartchan v0.0.2 h1:i0IjJZ7e36eQW/SuqFuP8iFKknAbAj7hp9wmGyV2zyI=

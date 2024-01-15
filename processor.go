@@ -24,7 +24,10 @@ import (
 	"encoding/csv"
 	`encoding/json`
 	`fmt`
+	`io`
+	`io/fs`
 	"log"
+	`net/url`
 	"os"
 	`os/exec`
 	`path/filepath`
@@ -32,6 +35,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	countable_waitgroup `github.com/andreimerlescu/go-countable-waitgroup`
 	"github.com/tealeg/xlsx"
 )
 
@@ -51,6 +55,9 @@ func process_import_csv(ctx context.Context, filename string, callback CallbackF
 	reader := csv.NewReader(bufferedReader)
 	if strings.HasSuffix(filename, ".psv") {
 		reader.Comma = '|'
+	}
+	if strings.HasSuffix(filename, ".tsv") {
+		reader.Comma = '	'
 	}
 	reader.FieldsPerRecord = -1
 	headerFields, bufferReadErr := reader.Read()
@@ -115,10 +122,14 @@ func process_import_xlsx(ctx context.Context, filename string, callback Callback
 	return nil
 }
 
-func process_download_pdf(ctx context.Context, filename string) error {
-	source_url := *flag_s_download_pdf_url
-
-	if !strings.HasPrefix(source_url, "http") {
+func process_download_pdf(ctx context.Context, source_url string, metadata_json string) error {
+	url_source, url_err := url.Parse(source_url)
+	if url_err != nil {
+		return url_err
+	}
+	filename := filepath.Base(url_source.Path)
+	log.Printf("process_download_pdf(%v) has a filename of %v", source_url, filename)
+	if url_source.Scheme != "https" {
 		if len(source_url) > 0 {
 			// has a value, but it doesnt begin with http
 			log.Printf("invalid source_url provided %v", source_url)
@@ -199,13 +210,19 @@ func process_download_pdf(ctx context.Context, filename string) error {
 		return pdfFileErr
 	}
 	checksum := FileSha512(pdfFile)
-	pdfFile.Close()
+	pdf_close_err := pdfFile.Close()
+	if pdf_close_err != nil {
+		return pdf_close_err
+	}
 
 	metadata := make(map[string]string)
-	metadata_bytes := bytes.NewBufferString(*flag_s_pdf_metadata_json).Bytes()
-	err = json.Unmarshal(metadata_bytes, &metadata)
-	if err != nil {
-		log.Printf("failed to parse the --metadata-json due to err %v", err)
+	if len(metadata_json) > 0 {
+		metadata_bytes := bytes.NewBufferString(metadata_json).Bytes()
+		err = json.Unmarshal(metadata_bytes, &metadata)
+		metadata_bytes = nil
+		if err != nil {
+			log.Printf("failed to parse the --metadata-json due to err %v", err)
+		}
 	}
 
 	pdf_text, pdf_text_err := extract_text_from_pdf(q_file_pdf)
@@ -265,13 +282,213 @@ func process_download_pdf(ctx context.Context, filename string) error {
 	return nil
 }
 
-func process_import_pdf(ctx context.Context, filename string) error {
-	// TODO: implement import pdf from local filesystem
+func process_import_pdf(ctx context.Context, path string, metadata_json string) error {
+	log.Printf("using ctx %v to process_import_pdf", ctx.Value(CtxKey("filename")))
+	basename := filepath.Base(path)
+	pdf_url_checksum := Sha256(basename)
+	identifier := NewIdentifier(6)
+
+	recordDir := filepath.Join(*flag_s_database_directory, pdf_url_checksum)
+	err := os.MkdirAll(recordDir, 0750)
+	if err != nil {
+		log.Printf("cannot mkdir -p %v due to err %v", recordDir, err)
+		return err
+	}
+
+	var (
+		q_file_pdf       = filepath.Join(recordDir, strings.ReplaceAll(basename, `/`, `_`))
+		q_file_ocr       = filepath.Join(recordDir, "ocr.txt")
+		q_file_extracted = filepath.Join(recordDir, "extracted.txt")
+		q_file_record    = filepath.Join(recordDir, "record.json")
+	)
+
+	original, original_open_err := os.Open(path)
+	if original_open_err != nil {
+		return original_open_err
+	}
+
+	original_stat, original_stat_err := os.Stat(path)
+	if original_stat_err != nil {
+		return original_stat_err
+	}
+
+	destination, destination_err := os.Create(q_file_pdf)
+	if destination_err != nil {
+		return destination_err
+	}
+
+	var bufferSize int64 = 8192 // 8MB
+	buffer := make([]byte, bufferSize)
+
+	if original_stat.Size() > bufferSize {
+		// more than 8MB in size, use the buffer approach
+		for {
+			bytes_read, read_err := original.Read(buffer)
+			if read_err != nil {
+				if read_err == io.EOF {
+					break // End of file reached, exit the loop
+				}
+				return read_err
+			}
+			_, write_err := destination.Write(buffer[:bytes_read])
+			if write_err != nil {
+				return write_err
+			}
+		}
+	} else {
+		_, copy_err := io.Copy(destination, original)
+		if copy_err != nil {
+			return copy_err
+		}
+	}
+
+	close_original_err := original.Close()
+	if close_original_err != nil {
+		return close_original_err
+	}
+	close_destination_err := destination.Close()
+	if close_destination_err != nil {
+		return close_destination_err
+	}
+
+	// [-TO-DO-]: first the downloaded file must be scanned through a virus scanner, this will introduce a runtime requirement release process update
+	// TODO: ensure clamav is installed via the release upgrade script
+	if !*flag_b_disable_clamav {
+		output, action_taken, clamav_scan_err := scan_path_with_clam_av(q_file_pdf)
+		if clamav_scan_err != nil {
+			log.Printf("while scanning %v clamav scan returned an err: %v", q_file_pdf, clamav_scan_err)
+			return clamav_scan_err
+		}
+
+		if action_taken {
+			log.Printf("action taken against %v with clamav: %v", q_file_pdf, output)
+			return fmt.Errorf("antivirus action taken against %v", q_file_pdf)
+		}
+	}
+
+	// [-TO-DO-]: analyze the metadata of the pdf file to determine totalPages, currently defaulting to 0
+	pdf_analysis, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
+	if pdf_analysis_err != nil {
+		log.Printf("received an err %v on pdf_analysis for %v", err, q_file_pdf)
+		return pdf_analysis_err
+	}
+
+	var info *PDFCPUInfoResponseInfo
+	if len(pdf_analysis.Infos) > 0 {
+		data := pdf_analysis.Infos[0] // capture
+		info = &data                  // point
+	}
+
+	var embedded_text string
+	if info != nil {
+		if info.Pages > 0 {
+			a_i_total_pages.Add(int64(info.Pages))
+		}
+		if len(info.Keywords) > 0 {
+			embedded_text = strings.Join(info.Keywords, " ")
+			embedded_text = strings.ReplaceAll(embedded_text, "  ", " ")
+		}
+	}
+
+	pdfFile, pdfFileErr := os.Open(q_file_pdf) // [-TO-DO-]: need to add some security around this process
+	if pdfFileErr != nil {
+		return pdfFileErr
+	}
+	checksum := FileSha512(pdfFile)
+	pdf_file_close_err := pdfFile.Close()
+	if pdf_file_close_err != nil {
+		return pdf_file_close_err
+	}
+
+	metadata := make(map[string]string)
+	if len(metadata_json) > 0 {
+		metadata_bytes := bytes.NewBufferString(metadata_json).Bytes()
+		err = json.Unmarshal(metadata_bytes, &metadata)
+		metadata_bytes = nil
+		if err != nil {
+			log.Printf("failed to parse the --metadata-json due to err %v", err)
+		}
+	}
+
+	pdf_text, pdf_text_err := extract_text_from_pdf(q_file_pdf)
+	if pdf_text_err != nil {
+		log.Printf("pdf_text_err = %v", pdf_text_err)
+	}
+
+	log.Printf("comparing pdf_text to embedded_text")
+
+	if len(embedded_text) > 17 {
+		save_extracted_err := write_string_to_file(q_file_extracted, embedded_text)
+		if save_extracted_err != nil {
+			log.Printf("save_extracted_err = %v", save_extracted_err)
+		}
+		info.Keywords = []string{} // flush memory
+	} else if len(pdf_text) > 17 {
+		save_extracted_err := write_string_to_file(q_file_extracted, pdf_text)
+		if save_extracted_err != nil {
+			log.Printf("save_extracted_err = %v", save_extracted_err)
+		}
+	}
+
+	rd := ResultData{
+		Identifier:        identifier,
+		DataDir:           recordDir,
+		TotalPages:        int64(info.Pages),
+		URLChecksum:       pdf_url_checksum,
+		PDFChecksum:       checksum,
+		PDFPath:           q_file_pdf,
+		OCRTextPath:       q_file_ocr,
+		ExtractedTextPath: q_file_extracted,
+		RecordPath:        q_file_record,
+		Info:              *info,
+		Metadata:          metadata,
+	}
+	err = WriteResultDataToJson(rd)
+	if err != nil {
+		return err
+	}
+	sm_resultdatas.Store(identifier, rd)
+	sm_documents.Store(identifier, Document{
+		Identifier:          identifier,
+		Pages:               make(map[int64]Page),
+		TotalPages:          int64(info.Pages),
+		CoverPageIdentifier: "",
+		Collection:          Collection{},
+	})
+	a_i_total_documents.Add(1)
+	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
+	err = ch_ImportedRow.Write(rd)
+	if err != nil {
+		log.Printf("cant write to ch_ImportedRow")
+		return err
+	}
 	return nil
 }
 
-func process_import_directory(ctx context.Context, filename string) error {
-	// TODO: implement import directory from local filesystem
+func process_import_directory(ctx context.Context, directory string) error {
+	wg := countable_waitgroup.CountableWaitGroup{}
+	err := filepath.Walk(directory, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".pdf") {
+			wg.Add(1)
+			go func(wg *countable_waitgroup.CountableWaitGroup) {
+				defer wg.Done()
+				process_err := process_import_pdf(ctx, path, "")
+				if process_err != nil {
+					return
+				}
+			}(&wg)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	wg.Wait()
 	return nil
 }
 

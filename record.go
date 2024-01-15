@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	`encoding/json`
 	"fmt"
 	"log"
 	"os"
@@ -29,6 +30,53 @@ import (
 )
 
 const jfk_pdf_download_prefix = "https://www.archives.gov/files/research/jfk/releases/"
+
+func process_custom_csv_row(ctx context.Context, row []Column) error {
+	var source_url string
+	var local_path string
+	metadata_columns := strings.Split(strings.ReplaceAll(*flag_s_metadata_columns, ` `, ``), ",")
+	metadata := make(map[string]string)
+	for _, column := range row {
+		if column.Header == *flag_s_csv_column_path {
+			local_path = column.Value
+			break
+		} else if column.Header == *flag_s_csv_column_url {
+			source_url = column.Value
+			break
+		} else {
+			for _, meta_column := range metadata_columns {
+				if strings.ToLower(column.Header) == strings.ToLower(meta_column) {
+					metadata[column.Header] = column.Value
+					break
+				}
+			}
+			continue
+		}
+	}
+	metadata_marshal, marshal_err := json.Marshal(metadata)
+	if marshal_err != nil {
+		return marshal_err
+	}
+	if len(source_url) == 0 && len(local_path) > 0 {
+		// use local_path
+		err := process_import_pdf(ctx, local_path, string(metadata_marshal))
+		if err != nil {
+			return err
+		}
+		return nil
+	} else if len(source_url) > 0 && len(local_path) == 0 {
+		// use source_url
+		err := process_download_pdf(ctx, source_url, string(metadata_marshal))
+		if err != nil {
+			return err
+		}
+		return nil
+	} else if len(source_url) == 0 && len(local_path) == 0 {
+		// both empty
+		return fmt.Errorf("failed to find columns for source_url or local_path in row")
+	}
+	return fmt.Errorf("failed to process_custom_csv_row due to bad data; skipping row")
+}
 
 func processRecord(ctx context.Context, row []Column) error {
 	log.Printf("processRecord received for row %v", row)

@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/andreimerlescu/configurable v0.0.8 // indirect
 	github.com/andreimerlescu/go-countable-waitgroup v0.0.3 // indirect
-	github.com/andreimerlescu/go-gematria v0.0.1 // indirect
+	github.com/andreimerlescu/go-gematria v0.0.2 // indirect
 	github.com/andreimerlescu/go-sema v0.0.1 // indirect
 	github.com/andreimerlescu/go-smartchan v0.0.2 // indirect
 	github.com/disintegration/imaging v1.6.2 // indirect
