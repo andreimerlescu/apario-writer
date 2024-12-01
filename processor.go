@@ -19,23 +19,23 @@ package main
 
 import (
 	"bufio"
-	`bytes`
+	"bytes"
 	"context"
 	"encoding/csv"
-	`encoding/json`
-	`fmt`
-	`io`
-	`io/fs`
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs"
 	"log"
-	`net/url`
+	"net/url"
 	"os"
-	`os/exec`
-	`path/filepath`
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 
-	countable_waitgroup `github.com/andreimerlescu/go-countable-waitgroup`
+	countable_waitgroup "github.com/andreimerlescu/go-countable-waitgroup"
 	"github.com/tealeg/xlsx"
 )
 
@@ -184,7 +184,7 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 	// [-TO-DO-]: analyze the metadata of the pdf file to determine totalPages, currently defaulting to 0
 	pdf_analysis, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
 	if pdf_analysis_err != nil {
-		log.Printf("received an err %v on pdf_analysis for %v", err, q_file_pdf)
+		log.Printf("received an err %v on pdf_analysis [187] for %v", err, q_file_pdf)
 		return pdf_analysis_err
 	}
 
@@ -351,6 +351,8 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 		return close_destination_err
 	}
 
+	log.Println("process_import_pdf() q_pdf_file = " + q_file_pdf)
+
 	// [-TO-DO-]: first the downloaded file must be scanned through a virus scanner, this will introduce a runtime requirement release process update
 	// TODO: ensure clamav is installed via the release upgrade script
 	if !*flag_b_disable_clamav {
@@ -369,7 +371,7 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	// [-TO-DO-]: analyze the metadata of the pdf file to determine totalPages, currently defaulting to 0
 	pdf_analysis, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
 	if pdf_analysis_err != nil {
-		log.Printf("received an err %v on pdf_analysis for %v", err, q_file_pdf)
+		log.Printf("received an err %v on pdf_analysis for %v", pdf_analysis_err, q_file_pdf)
 		return pdf_analysis_err
 	}
 
@@ -557,8 +559,16 @@ func analyze_pdf_path(path string) (PDFCPUInfoResponse, error) {
 	if err != nil {
 		return PDFCPUInfoResponse{}, err
 	}
+	outStr := string(out.Bytes())
+	jsonStartIndex := strings.Index(outStr, "{")
+	if jsonStartIndex == -1 {
+		return PDFCPUInfoResponse{}, fmt.Errorf("no JSON content found in pdfcpu output")
+	}
+
+	cleanJSON := outStr[jsonStartIndex:]
+	outStr = strings.TrimSpace(cleanJSON)
 	var pdf_info PDFCPUInfoResponse
-	pdf_info_err := json.Unmarshal(out.Bytes(), &pdf_info)
+	pdf_info_err := json.Unmarshal([]byte(outStr), &pdf_info)
 	if pdf_info_err != nil {
 		return PDFCPUInfoResponse{}, pdf_info_err
 	}

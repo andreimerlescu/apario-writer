@@ -1,10 +1,10 @@
 package main
 
 import (
-	`fmt`
-	`path/filepath`
+	"fmt"
+	"path/filepath"
 
-	con `github.com/andreimerlescu/configurable`
+	con "github.com/andreimerlescu/configurable"
 )
 
 var (
@@ -16,6 +16,7 @@ var (
 	flag_s_import_pdf_path           = config.NewString("import-pdf-path", "", "relative path to the pdf that will be processed that are less than 369MB")
 	flag_s_import_directory          = config.NewString("import-directory", "", "absolute path to a directory that will import all .pdf files that are less than 369MB")
 	flag_s_import_xlsx               = config.NewString("import-xlsx", "", "relative path to an excel spreadsheet where sheet 1 is a table of urls and metadata properties. use additional args to associate columns to key data points.")
+	flag_s_xlsx_path_directory       = config.NewString("xlsx-path-directory", "", "absolute path to the directory containing the filenames in the Path column of the XLSX file")
 	flag_s_xlsx_column_url           = config.NewString("xlsx-column-url", "", "value of row 1 whose column correlates to URLs to download PDF files from")
 	flag_s_xlsx_column_path          = config.NewString("xlsx-column-path", "", "value of row 1 whose column correlates to absolute paths of PDF files")
 	flag_s_xlsx_column_record_number = config.NewString("xlsx-column-record-number", "", "value of row 1 whose column correlates to a unique record identifier or number")

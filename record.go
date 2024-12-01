@@ -18,11 +18,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 package main
 
 import (
+	"bytes"
 	"context"
-	`encoding/json`
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -94,12 +96,18 @@ func processRecord(ctx context.Context, row []Column) error {
 	// jfk2021 = Record Number,File Title,NARA Release Date,Formerly Withheld,Document Date,Document Type,File Number,To,From,Title,Original Document Pages,Originator,Record Series,Review Date,Comments,Document Pages in PDF
 	// jfk2018 = File Name,Record Num,NARA Release Date,Formerly Withheld,Agency,Doc Date,Doc Type,File Num,To Name,From Name,Title,Num Pages,Originator,Record Series,Review Date,Comments,Pages Released
 
+	// if the column Path does not contain a / indicating its an absolute path, then use the PathDirectory property to get the path of the local PDF to the writer
+	var pdf_local_path string
+	if !strings.HasPrefix(*flag_s_xlsx_column_path, `/`) {
+		pdf_local_path = strings.Clone(*flag_s_xlsx_path_directory + *flag_s_xlsx_column_path)
+	}
+
 	var dateErr error
 	for _, r := range row {
 		switch r.Header {
-		case "filename", "File Name":
+		case "filename", "File Name", *flag_s_xlsx_column_path:
 			filename = r.Value
-		case "title", "Title", "File Title":
+		case "title", "Title", "File Title", *flag_s_xlsx_column_title:
 			title = r.Value
 		case "Comments":
 			comments = r.Value
@@ -111,11 +119,11 @@ func processRecord(ctx context.Context, row []Column) error {
 			collection = r.Value
 		case "pdf_url":
 			pdf_url = r.Value
-		case "document_number", "Record Num":
+		case "document_number", "Record Num", *flag_s_xlsx_column_record_number:
 			record_number = r.Value
 		case "Agency":
 			agency = r.Value
-		case "source_url":
+		case "source_url", *flag_s_xlsx_column_url:
 			source_url = r.Value
 		case "creation_date", "Doc Date", "Document Date":
 			creation_date, dateErr = parseDateString(r.Value)
@@ -134,6 +142,26 @@ func processRecord(ctx context.Context, row []Column) error {
 			}
 		}
 	}
+
+	// when no TotalPages column is available, determine the total using pdfinfo binary
+	if totalPages == 0 && len(pdf_local_path) > 0 {
+		cmd := exec.CommandContext(ctx, "sh", "-s", fmt.Sprintf("pdfinfo %s | grep Pages | awk '{print $2}'", pdf_local_path))
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		err := cmd.Run()
+		if err != nil {
+			log.Printf("Error running command: %v\n", err)
+			return err
+		}
+		tp := strings.TrimSpace(out.String())
+		tpi, ie := strconv.Atoi(tp)
+		if ie != nil {
+			log.Printf("Error converting pages to int: %v", ie)
+			return ie
+		}
+		totalPages = int64(tpi)
+	}
+
 	a_i_total_pages.Add(totalPages)
 
 	if !strings.HasPrefix(pdf_url, "http") && strings.Contains(loadedFile, "jfk") {

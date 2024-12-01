@@ -17,11 +17,11 @@ RUN apt-get update && apt-get install -y \
     clamav \
     clamav-daemon \
     && rm -rf /var/lib/apt/lists/*
-RUN wget https://github.com/pdfcpu/pdfcpu/releases/download/v0.6.0/pdfcpu_0.6.0_Linux_x86_64.tar.xz \
-    && tar xf pdfcpu_0.4.1_Linux_x86_64.tar.xz \
-    && mv pdfcpu_0.4.1_Linux_x86_64/pdfcpu /usr/local/bin \
-    && rm pdfcpu_0.4.1_Linux_x86_64.tar.xz \
-    && rm -rf pdfcpu_0.4.1_Linux_x86_64
+RUN wget https://github.com/pdfcpu/pdfcpu/releases/download/v0.9.1/pdfcpu_0.9.1_Linux_x86_64.tar.xz \
+    && tar xf pdfcpu_0.9.1_Linux_x86_64.tar.xz \
+    && mv pdfcpu_0.9.1_Linux_x86_64/pdfcpu /usr/local/bin \
+    && rm pdfcpu_0.9.1_Linux_x86_64.tar.xz \
+    && rm -rf pdfcpu_0.9.1_Linux_x86_64
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-all \

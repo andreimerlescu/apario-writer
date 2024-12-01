@@ -1,6 +1,6 @@
 .PHONY: install build run dbuild drun dbash containered
 
-PROJECT = apario-contribution
+PROJECT = apario-writer
 TAG = go-1.20.4-buster
 
 LOGFILE = logs/containered.log
