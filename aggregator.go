@@ -19,8 +19,7 @@ package main
 
 import (
 	"context"
-	`log`
-	`sync`
+	"log"
 )
 
 func aggregatePendingPage(ctx context.Context, pp PendingPage) {
@@ -60,7 +59,9 @@ func aggregatePendingPage(ctx context.Context, pp PendingPage) {
 	}
 
 	if document.mu == nil {
-		document.mu = &sync.Mutex{}
+		log.Printf("document is missing a mutex defined on it in aggregatePendingPage for Document ID: %s",
+			document.Identifier)
+		return
 	}
 
 	document.mu.Lock()

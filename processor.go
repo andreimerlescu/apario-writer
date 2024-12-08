@@ -271,6 +271,7 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 		TotalPages:          int64(info.Pages),
 		CoverPageIdentifier: "",
 		Collection:          Collection{},
+		mu:                  &sync.Mutex{},
 	})
 	a_i_total_documents.Add(1)
 	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
@@ -456,6 +457,7 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 		TotalPages:          int64(info.Pages),
 		CoverPageIdentifier: "",
 		Collection:          Collection{},
+		mu:                  &sync.Mutex{},
 	})
 	a_i_total_documents.Add(1)
 	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)

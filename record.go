@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -264,6 +265,7 @@ func processRecord(ctx context.Context, row []Column) error {
 		TotalPages:          int64(totalPages),
 		CoverPageIdentifier: "",
 		Collection:          Collection{},
+		mu:                  &sync.Mutex{},
 	})
 	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
 	err = ch_ImportedRow.Write(rd)
