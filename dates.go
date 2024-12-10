@@ -18,10 +18,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 package main
 
 import (
-	`log`
-	`strconv`
-	`strings`
-	`time`
+	"strconv"
+	"strings"
+	"time"
 )
 
 func extractDates(in string) []time.Time {
@@ -30,18 +29,18 @@ func extractDates(in string) []time.Time {
 	match1 := re_date1.FindAllStringSubmatch(in, -1)
 	for _, m := range match1 {
 		if len(m) < 4 {
-			log.Printf("catch check m within match1 due to the length of m being %d", len(m))
+			log_debug.Tracef("catch check m within match1 due to the length of m being %d", len(m))
 			continue
 		}
 		day, dayErr := strconv.Atoi(m[1])
 		if dayErr != nil {
-			log.Printf("failed to parse the day %v inside the date %v with error %v", m[1], m, dayErr)
+			log_debug.Tracef("failed to parse the day %v inside the date %v with error %v", m[1], m, dayErr)
 			continue
 		}
 		month := getMonthFromString(m[3])
 		year, yearErr := strconv.Atoi(m[4])
 		if yearErr != nil {
-			log.Printf("failed to parse the year %v inside the date %v with error %v", m[2], m, yearErr)
+			log_debug.Tracef("failed to parse the year %v inside the date %v with error %v", m[2], m, yearErr)
 			continue
 		}
 		dates = append(dates, time.Date(year, month, day, 0, 0, 0, 0, time.UTC))
@@ -50,18 +49,18 @@ func extractDates(in string) []time.Time {
 	match2 := re_date2.FindAllStringSubmatch(in, -1)
 	for _, m := range match2 {
 		if len(m) < 3 {
-			log.Printf("catch check m within match2 due to the length of m being %d", len(m))
+			log_debug.Tracef("catch check m within match2 due to the length of m being %d", len(m))
 			continue
 		}
 		month, _ := strconv.Atoi(m[1])
 		day, dayErr := strconv.Atoi(m[2])
 		if dayErr != nil {
-			log.Printf("failed to parse the day %v inside the date %v with error %v", m[2], m, dayErr)
+			log_debug.Tracef("failed to parse the day %v inside the date %v with error %v", m[2], m, dayErr)
 			continue
 		}
 		year, yearErr := strconv.Atoi(m[3])
 		if yearErr != nil {
-			log.Printf("failed to parse the year %v inside the date %v with error %v", m[3], m, yearErr)
+			log_debug.Tracef("failed to parse the year %v inside the date %v with error %v", m[3], m, yearErr)
 			continue
 		}
 		dates = append(dates, time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC))
@@ -70,13 +69,13 @@ func extractDates(in string) []time.Time {
 	match3 := re_date3.FindAllStringSubmatch(in, -1)
 	for _, m := range match3 {
 		if len(m) < 2 {
-			log.Printf("catch check m within match3 due to the length of m being %d", len(m))
+			log_debug.Tracef("catch check m within match3 due to the length of m being %d", len(m))
 			continue
 		}
 		month := getMonthFromString(m[1])
 		year, yearErr := strconv.Atoi(m[2])
 		if yearErr != nil {
-			log.Printf("failed to parse the year %v inside the date %v with error %v", m[2], m, yearErr)
+			log_debug.Tracef("failed to parse the year %v inside the date %v with error %v", m[2], m, yearErr)
 			continue
 		}
 		dates = append(dates, time.Date(year, month, 1, 0, 0, 0, 0, time.UTC))
@@ -85,13 +84,13 @@ func extractDates(in string) []time.Time {
 	match4 := re_date4.FindAllStringSubmatch(in, -1)
 	for _, m := range match4 {
 		if len(m) < 2 {
-			log.Printf("catch check m within match6 due to the length of m being %d", len(m))
+			log_debug.Tracef("catch check m within match6 due to the length of m being %d", len(m))
 			continue
 		}
 		month := getMonthFromString(m[1])
 		year, yearErr := strconv.Atoi(m[2])
 		if yearErr != nil {
-			log.Printf("failed to parse the year %v inside the date %v with error %v", m[2], m, yearErr)
+			log_debug.Tracef("failed to parse the year %v inside the date %v with error %v", m[2], m, yearErr)
 			continue
 		}
 		dates = append(dates, time.Date(year, month, 1, 0, 0, 0, 0, time.UTC))
@@ -100,18 +99,18 @@ func extractDates(in string) []time.Time {
 	match5 := re_date5.FindAllStringSubmatch(in, -1)
 	for _, m := range match5 {
 		if len(m) < 3 {
-			log.Printf("catch check m within match5 due to the length of m being %d", len(m))
+			log_debug.Tracef("catch check m within match5 due to the length of m being %d", len(m))
 			continue
 		}
 		month := getMonthFromString(m[1])
 		day, dayErr := strconv.Atoi(m[2])
 		if dayErr != nil {
-			log.Printf("failed to parse the day %v inside the date %v with error %v", m[2], m, dayErr)
+			log_debug.Tracef("failed to parse the day %v inside the date %v with error %v", m[2], m, dayErr)
 			continue
 		}
 		year, yearErr := strconv.Atoi(m[4])
 		if yearErr != nil {
-			log.Printf("failed to parse the year %v inside the date %v with error %v", m[3], m, yearErr)
+			log_debug.Tracef("failed to parse the year %v inside the date %v with error %v", m[3], m, yearErr)
 			continue
 		}
 		dates = append(dates, time.Date(year, month, day, 0, 0, 0, 0, time.UTC))
@@ -120,12 +119,12 @@ func extractDates(in string) []time.Time {
 	match6 := re_date6.FindAllStringSubmatch(in, -1)
 	for _, m := range match6 {
 		if len(m) < 1 {
-			log.Printf("catch check m within match4 due to the length of m being %d", len(m))
+			log_debug.Tracef("catch check m within match4 due to the length of m being %d", len(m))
 			continue
 		}
 		year, yearErr := strconv.Atoi(m[1])
 		if yearErr != nil {
-			log.Printf("failed to parse the year %v inside the date %v with error %v", m[1], m, yearErr)
+			log_error.Tracef("failed to parse the year %v inside the date %v with error %v", m[1], m, yearErr)
 			continue
 		}
 		years := map[int]time.Time{}

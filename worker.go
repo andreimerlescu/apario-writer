@@ -214,7 +214,7 @@ func downloadFile(ctx context.Context, url string, output string) error {
 				return ctx.Err()
 			}
 		} else {
-			log.Printf("downloadFile returned an err: %v", err)
+			log_error.Tracef("downloadFile returned an err: %v", err)
 			break
 		}
 	}
@@ -351,12 +351,12 @@ func convertAndOptimizePNG(imgFile *os.File, outputFilename string) error {
 
 	if paletted, ok := img.(*image.Paletted); ok {
 		img = palettedToRGBA(paletted)
-		log.Printf("converting `img` %v *image.Paletted into %T", imgFile.Name(), img)
+		log_info.Printf("converting `img` %v *image.Paletted into %T", imgFile.Name(), img)
 	}
 
 	if rgba64, ok := img.(*image.RGBA64); ok {
 		img = rgba64ToRGBA(rgba64)
-		log.Printf("converting `img` %v *image.RGBA64 into %T", imgFile.Name(), img)
+		log_info.Printf("converting `img` %v *image.RGBA64 into %T", imgFile.Name(), img)
 	}
 
 	outputFile, err2 := os.Create(outputFilename)
@@ -604,7 +604,7 @@ func NewIdentifier(length int) string {
 			max := big.NewInt(int64(len(c_identifier_charset)))
 			randIndex, err := rand.Int(rand.Reader, max)
 			if err != nil {
-				log.Printf("failed to generate random number: %v", err)
+				log_error.Tracef("failed to generate random number: %v", err)
 				continue
 			}
 			identifier[i] = c_identifier_charset[randIndex.Int64()]

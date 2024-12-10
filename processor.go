@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -42,13 +41,13 @@ import (
 func process_import_csv(ctx context.Context, filename string, callback CallbackFunc) error {
 	file, openErr := os.Open(filename)
 	if openErr != nil {
-		log.Printf("cant open the file because of err: %v", openErr)
+		log_error.Tracef("cant open the file because of err: %v", openErr)
 		return openErr
 	}
 	defer func(file *os.File) {
 		closeErr := file.Close()
 		if closeErr != nil {
-			log.Fatalf("failed to close the file %v caused error %v", filename, closeErr)
+			log_error.Fatalf("failed to close the file %v caused error %v", filename, closeErr)
 		}
 	}(file)
 	bufferedReader := bufio.NewReaderSize(file, reader_buffer_bytes)
@@ -62,10 +61,10 @@ func process_import_csv(ctx context.Context, filename string, callback CallbackF
 	reader.FieldsPerRecord = -1
 	headerFields, bufferReadErr := reader.Read()
 	if bufferReadErr != nil {
-		log.Printf("cant read the csv buffer because of err: %v", bufferReadErr)
+		log_error.Tracef("cant read the csv buffer because of err: %v", bufferReadErr)
 		return bufferReadErr
 	}
-	log.Printf("headerFields = %v", strings.Join(headerFields, ","))
+	log_info.Printf("headerFields = %v", strings.Join(headerFields, ","))
 	row := make(chan []Column, channel_buffer_size)
 	totalRows, rowWg := atomic.Uint32{}, sync.WaitGroup{}
 	done := make(chan struct{})
@@ -73,7 +72,7 @@ func process_import_csv(ctx context.Context, filename string, callback CallbackF
 	for {
 		rowFields, readerErr := reader.Read()
 		if readerErr != nil {
-			log.Printf("skipping row due to error %v with data %v", readerErr, rowFields)
+			log_info.Printf("skipping row due to error %v with data %v", readerErr, rowFields)
 			break
 		}
 		totalRows.Add(1)
@@ -84,14 +83,14 @@ func process_import_csv(ctx context.Context, filename string, callback CallbackF
 	rowWg.Wait()
 	close(row)
 	<-done
-	log.Printf("totalRows = %d", totalRows.Load())
+	log_info.Printf("totalRows = %d", totalRows.Load())
 	return nil
 }
 
 func process_import_xlsx(ctx context.Context, filename string, callback CallbackFunc) error {
 	file, err := xlsx.OpenFile(filename)
 	if err != nil {
-		log.Printf("cant open the file because of err: %v", err)
+		log_error.Tracef("cant open the file because of err: %v", err)
 		return err
 	}
 	sheet := file.Sheets[0]
@@ -101,7 +100,7 @@ func process_import_xlsx(ctx context.Context, filename string, callback Callback
 			headerFields = append(headerFields, cell.String())
 		}
 	}
-	log.Printf("headerFields = %v", strings.Join(headerFields, ","))
+	log_info.Printf("headerFields = %v", strings.Join(headerFields, ","))
 	row := make(chan []Column, channel_buffer_size)
 	totalRows, rowWg := atomic.Uint32{}, sync.WaitGroup{}
 	done := make(chan struct{})
@@ -118,7 +117,7 @@ func process_import_xlsx(ctx context.Context, filename string, callback Callback
 	rowWg.Wait()
 	close(row)
 	<-done
-	log.Printf("totalRows = %d", totalRows.Load())
+	log_info.Printf("totalRows = %d", totalRows.Load())
 	return nil
 }
 
@@ -128,11 +127,11 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 		return url_err
 	}
 	filename := filepath.Base(url_source.Path)
-	log.Printf("process_download_pdf(%v) has a filename of %v", source_url, filename)
+	log_info.Printf("process_download_pdf(%v) has a filename of %v", source_url, filename)
 	if url_source.Scheme != "https" {
 		if len(source_url) > 0 {
 			// has a value, but it doesnt begin with http
-			log.Printf("invalid source_url provided %v", source_url)
+			log_error.Tracef("invalid source_url provided %v", source_url)
 			return fmt.Errorf("ERROR: --download-pdf-url doesn't begin with http but has a value of %v", source_url)
 		}
 	}
@@ -144,7 +143,7 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 	recordDir := filepath.Join(*flag_s_database_directory, pdf_url_checksum)
 	err := os.MkdirAll(recordDir, 0750)
 	if err != nil {
-		log.Printf("cannot mkdir -p %v due to err %v", recordDir, err)
+		log_error.Tracef("cannot mkdir -p %v due to err %v", recordDir, err)
 		return err
 	}
 
@@ -158,10 +157,10 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 
 	_, downloadedPdfErr := os.Stat(q_file_pdf)
 	if os.IsNotExist(downloadedPdfErr) {
-		log.Printf("downloading URL %v to %v", source_url, q_file_pdf)
+		log_info.Printf("downloading URL %v to %v", source_url, q_file_pdf)
 		err = downloadFile(ctx, source_url, q_file_pdf)
 		if err != nil {
-			log.Printf("received an error while downloading the file")
+			log_error.Tracef("received an error while downloading the file")
 			return err
 		}
 	}
@@ -171,12 +170,12 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 	if !*flag_b_disable_clamav {
 		output, action_taken, clamav_scan_err := scan_path_with_clam_av(q_file_pdf)
 		if clamav_scan_err != nil {
-			log.Printf("while scanning %v clamav scan returned an err: %v", q_file_pdf, clamav_scan_err)
+			log_error.Tracef("while scanning %v clamav scan returned an err: %v", q_file_pdf, clamav_scan_err)
 			return clamav_scan_err
 		}
 
 		if action_taken {
-			log.Printf("action taken against %v with clamav: %v", q_file_pdf, output)
+			log_debug.Tracef("action taken against %v with clamav: %v", q_file_pdf, output)
 			return fmt.Errorf("antivirus action taken against %v", q_file_pdf)
 		}
 	}
@@ -184,14 +183,33 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 	// [-TO-DO-]: analyze the metadata of the pdf file to determine totalPages, currently defaulting to 0
 	pdf_analysis, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
 	if pdf_analysis_err != nil {
-		log.Printf("received an err %v on pdf_analysis [187] for %v", err, q_file_pdf)
-		return pdf_analysis_err
+		/*
+			this double check and overload on pdf_analysis, pdf_analysis_err is due to a bug found in the apario-writer
+			while ingesting the Project Minnesota Election Selections documents. How PDF files are rendered matters to
+			open source software, and proprietary PDF software is notorious for putting corrupted data inside the files
+			that render without issue on their programs, but on open source libraries like that which apario-reader uses
+			the error shows up on linux systems and as such; we were getting to the end of the collection in a few hours
+			but the program was never exiting; this was due to the mix-matching count of a_i_documents to write to ch_Done
+			but, given that there were errors in the PDFs analysis, the metrics about getting the PDF file was successful,
+			but downstream errors in the same PDF files were rooted in the problem here as the PDFCPUInfoResponse struct
+			is corrupted. All good!
+		*/
+		pdf_analysis, pdf_analysis_err = repair_then_analyze_pdf(q_file_pdf)
+		if pdf_analysis_err != nil {
+			log_error.Tracef("received an err %v on pdf_analysis [187] for %v", err, q_file_pdf)
+			return pdf_analysis_err
+		}
 	}
 
 	var info *PDFCPUInfoResponseInfo
 	if len(pdf_analysis.Infos) > 0 {
 		data := pdf_analysis.Infos[0] // capture
 		info = &data                  // point
+	}
+
+	if info == nil {
+		log_debug.Tracef("WARN info is nil in process_download_pdf")
+		info = &PDFCPUInfoResponseInfo{}
 	}
 
 	var embedded_text string
@@ -221,27 +239,27 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 		err = json.Unmarshal(metadata_bytes, &metadata)
 		metadata_bytes = nil
 		if err != nil {
-			log.Printf("failed to parse the --metadata-json due to err %v", err)
+			log_error.Tracef("failed to parse the --metadata-json due to err %v", err)
 		}
 	}
 
 	pdf_text, pdf_text_err := extract_text_from_pdf(q_file_pdf)
 	if pdf_text_err != nil {
-		log.Printf("pdf_text_err = %v", pdf_text_err)
+		log_error.Tracef("pdf_text_err = %v", pdf_text_err)
 	}
 
-	log.Printf("comparing pdf_text to embedded_text")
+	log_info.Printf("comparing pdf_text to embedded_text")
 
 	if len(embedded_text) > 17 {
 		save_extracted_err := write_string_to_file(q_file_extracted, embedded_text)
 		if save_extracted_err != nil {
-			log.Printf("save_extracted_err = %v", save_extracted_err)
+			log_error.Tracef("save_extracted_err = %v", save_extracted_err)
 		}
 		info.Keywords = []string{} // flush memory
 	} else if len(pdf_text) > 17 {
 		save_extracted_err := write_string_to_file(q_file_extracted, pdf_text)
 		if save_extracted_err != nil {
-			log.Printf("save_extracted_err = %v", save_extracted_err)
+			log_error.Tracef("save_extracted_err = %v", save_extracted_err)
 		}
 	}
 
@@ -271,20 +289,19 @@ func process_download_pdf(ctx context.Context, source_url string, metadata_json 
 		TotalPages:          int64(info.Pages),
 		CoverPageIdentifier: "",
 		Collection:          Collection{},
-		mu:                  &sync.Mutex{},
 	})
 	a_i_total_documents.Add(1)
-	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
+	log_info.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
 	err = ch_ImportedRow.Write(rd)
 	if err != nil {
-		log.Printf("cant write to ch_ImportedRow")
+		log_error.Tracef("cant write to ch_ImportedRow: %+v", err)
 		return err
 	}
 	return nil
 }
 
 func process_import_pdf(ctx context.Context, path string, metadata_json string) error {
-	log.Printf("using ctx %v to process_import_pdf", ctx.Value(CtxKey("filename")))
+	//log.Printf("using ctx %v to process_import_pdf", ctx.Value(CtxKey("filename")))
 	basename := filepath.Base(path)
 	pdf_url_checksum := Sha256(basename)
 	identifier := NewIdentifier(6)
@@ -292,7 +309,7 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	recordDir := filepath.Join(*flag_s_database_directory, pdf_url_checksum)
 	err := os.MkdirAll(recordDir, 0750)
 	if err != nil {
-		log.Printf("cannot mkdir -p %v due to err %v", recordDir, err)
+		log_error.Fatalf("cannot mkdir -p %v due to err %v", recordDir, err)
 		return err
 	}
 
@@ -352,19 +369,19 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 		return close_destination_err
 	}
 
-	log.Println("process_import_pdf() q_pdf_file = " + q_file_pdf)
+	//log.Println("process_import_pdf() q_pdf_file = " + q_file_pdf)
 
 	// [-TO-DO-]: first the downloaded file must be scanned through a virus scanner, this will introduce a runtime requirement release process update
 	// TODO: ensure clamav is installed via the release upgrade script
 	if !*flag_b_disable_clamav {
 		output, action_taken, clamav_scan_err := scan_path_with_clam_av(q_file_pdf)
 		if clamav_scan_err != nil {
-			log.Printf("while scanning %v clamav scan returned an err: %v", q_file_pdf, clamav_scan_err)
+			log_debug.Tracef("while scanning %v clamav scan returned an err: %v", q_file_pdf, clamav_scan_err)
 			return clamav_scan_err
 		}
 
 		if action_taken {
-			log.Printf("action taken against %v with clamav: %v", q_file_pdf, output)
+			log_debug.Tracef("action taken against %v with clamav: %v", q_file_pdf, output)
 			return fmt.Errorf("antivirus action taken against %v", q_file_pdf)
 		}
 	}
@@ -372,7 +389,7 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	// [-TO-DO-]: analyze the metadata of the pdf file to determine totalPages, currently defaulting to 0
 	pdf_analysis, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
 	if pdf_analysis_err != nil {
-		log.Printf("received an err %v on pdf_analysis for %v", pdf_analysis_err, q_file_pdf)
+		log_debug.Tracef("received an err %v on pdf_analysis for %v \n\n %+v", pdf_analysis_err, q_file_pdf, pdf_analysis)
 		return pdf_analysis_err
 	}
 
@@ -380,6 +397,10 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	if len(pdf_analysis.Infos) > 0 {
 		data := pdf_analysis.Infos[0] // capture
 		info = &data                  // point
+	}
+
+	if info == nil {
+		info = &PDFCPUInfoResponseInfo{Pages: 0}
 	}
 
 	var embedded_text string
@@ -409,27 +430,27 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 		err = json.Unmarshal(metadata_bytes, &metadata)
 		metadata_bytes = nil
 		if err != nil {
-			log.Printf("failed to parse the --metadata-json due to err %v", err)
+			log_debug.Tracef("failed to parse the --metadata-json due to err %v", err)
 		}
 	}
 
 	pdf_text, pdf_text_err := extract_text_from_pdf(q_file_pdf)
 	if pdf_text_err != nil {
-		log.Printf("pdf_text_err = %v", pdf_text_err)
+		log_error.Tracef("pdf_text_err = %v", pdf_text_err)
 	}
 
-	log.Printf("comparing pdf_text to embedded_text")
+	//log.Printf("comparing pdf_text to embedded_text")
 
 	if len(embedded_text) > 17 {
 		save_extracted_err := write_string_to_file(q_file_extracted, embedded_text)
 		if save_extracted_err != nil {
-			log.Printf("save_extracted_err = %v", save_extracted_err)
+			log_error.Tracef("save_extracted_err = %v", save_extracted_err)
 		}
 		info.Keywords = []string{} // flush memory
 	} else if len(pdf_text) > 17 {
 		save_extracted_err := write_string_to_file(q_file_extracted, pdf_text)
 		if save_extracted_err != nil {
-			log.Printf("save_extracted_err = %v", save_extracted_err)
+			log_error.Tracef("save_extracted_err = %v", save_extracted_err)
 		}
 	}
 
@@ -457,13 +478,12 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 		TotalPages:          int64(info.Pages),
 		CoverPageIdentifier: "",
 		Collection:          Collection{},
-		mu:                  &sync.Mutex{},
 	})
 	a_i_total_documents.Add(1)
-	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
+	log_info.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
 	err = ch_ImportedRow.Write(rd)
 	if err != nil {
-		log.Printf("cant write to ch_ImportedRow")
+		log_error.Tracef("cant write to ch_ImportedRow: %+v", err)
 		return err
 	}
 	return nil
@@ -552,6 +572,42 @@ func extract_text_from_pdf(path string) (string, error) {
 	return out.String(), nil
 }
 
+func repair_pdf(path string) error {
+	dir_path := filepath.Dir(path)
+	filename := filepath.Base(path)
+	format := `gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.5 -dPDFSETTINGS=/prepress -dNOPAUSE -dQUIET -dBATCH -sOutputFile=%s %s`
+	source_path := strings.Clone(path)
+	dest_path := filepath.Join(dir_path, "repaired_"+filename)
+	command := fmt.Sprintf(format, dest_path, source_path)
+	cmd := exec.Command(command)
+	var out bytes.Buffer
+	var err bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &err
+	runErr := cmd.Run()
+	if runErr != nil || strings.Contains(string(err.Bytes()), `err`) {
+		return runErr
+	}
+	source_rm_err := os.Remove(source_path)
+	if source_rm_err != nil {
+		return source_rm_err
+	}
+	rename_err := os.Rename(dest_path, source_path)
+	if rename_err != nil {
+		return rename_err
+	}
+	return nil
+}
+
+func repair_then_analyze_pdf(path string) (PDFCPUInfoResponse, error) {
+	repair_err := repair_pdf(path)
+	if repair_err != nil {
+		return PDFCPUInfoResponse{}, repair_err
+	}
+	return analyze_pdf_path(path)
+
+}
+
 // analyze_pdf_path uses the `pdfcpu` utility to determine properties about a PDF file.
 func analyze_pdf_path(path string) (PDFCPUInfoResponse, error) {
 	cmd := exec.Command("pdfcpu", "info", "-json", path)
@@ -609,7 +665,7 @@ func ProcessRow(headerFields []string, rowFields []string, rowWg *sync.WaitGroup
 				return
 			}
 			if len(headerFields) < i {
-				log.Printf("skipping rowField %v due to headerFields not matching up properly", rowFields[i])
+				log_debug.Tracef("skipping rowField %v due to headerFields not matching up properly", rowFields[i])
 				continue
 			}
 			rowData = append(rowData, Column{headerFields[i], value})
@@ -632,7 +688,7 @@ func ReceiveRows(ctx context.Context, row chan []Column, filename string, callba
 			a_i_total_documents.Add(1)
 			callbackErr := callback(ctx, populatedRow)
 			if callbackErr != nil {
-				log.Printf("failed to insert row %v with error %v", populatedRow, callbackErr)
+				log_debug.Tracef("failed to insert row %v with error %v", populatedRow, callbackErr)
 			}
 		}
 	}

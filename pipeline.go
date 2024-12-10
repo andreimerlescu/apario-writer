@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,7 +29,7 @@ import (
 )
 
 func validatePdf(ctx context.Context, record ResultData) (ResultData, error) {
-	log.Printf("started validatePdf(%v) = %v", record.Identifier, record.PDFPath)
+	log_info.Printf("started validatePdf(%v) = %v", record.Identifier, record.PDFPath)
 
 	_, rjsonErr := os.Stat(record.RecordPath)
 	if os.IsNotExist(rjsonErr) {
@@ -89,15 +88,15 @@ func validatePdf(ctx context.Context, record ResultData) (ResultData, error) {
 
 func extractPlainTextFromPdf(ctx context.Context, record ResultData) {
 	defer func() {
-		log.Printf("finished extracting the text from the PDF %v, now sending rd into ch_ExtractPages", filepath.Base(record.PDFPath))
+		log_info.Printf("finished extracting the text from the PDF %v, now sending rd into ch_ExtractPages", filepath.Base(record.PDFPath))
 		if ch_ExtractPages.CanWrite() {
 			err := ch_ExtractPages.Write(record)
 			if err != nil {
-				log.Printf("failed to write record %v into the ch_ExtractPages due to error %v", record, err)
+				log_error.Tracef("failed to write record %v into the ch_ExtractPages due to error %v", record, err)
 			}
 		}
 	}()
-	log.Printf("started extractPlainTextFromPdf(%v) = %v", record.Identifier, record.PDFPath)
+	log_info.Printf("started extractPlainTextFromPdf(%v) = %v", record.Identifier, record.PDFPath)
 	if ok, err := fileHasData(record.ExtractedTextPath); !ok || err != nil {
 		/*
 			pdftotext REPLACE_WITH_FILE_PATH REPLACE_WITH_TEXT_OUTPUT_FILE_PATH
@@ -111,14 +110,14 @@ func extractPlainTextFromPdf(ctx context.Context, record ResultData) {
 		cmd_extract_text_pdf_err := cmd_extract_text_pdf.Run()
 		sem_pdftotext.Release()
 		if cmd_extract_text_pdf_err != nil {
-			log.Printf("Failed to execute command `pdftotext %v %v` due to error: %s\n", record.PDFPath, record.ExtractedTextPath, cmd_extract_text_pdf_err)
+			log_error.Tracef("Failed to execute command `pdftotext %v %v` due to error: %s\n", record.PDFPath, record.ExtractedTextPath, cmd_extract_text_pdf_err)
 			return
 		}
 	}
 }
 
 func extractPagesFromPdf(ctx context.Context, record ResultData) {
-	log.Printf("started extractPagesFromPdf(%v) = %v", record.Identifier, record.PDFPath)
+	log_info.Printf("started extractPagesFromPdf(%v) = %v", record.Identifier, record.PDFPath)
 	/*
 		pdfcpu extract -mode page REPLACE_WITH_FILE_PATH REPLACE_WITH_OUTPUT_DIRECTORY
 	*/
@@ -137,7 +136,7 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 	if performPagesExtract {
 		pagesDirErr := os.MkdirAll(pagesDir, 0755)
 		if pagesDirErr != nil {
-			log.Printf("failed to create directory %v due to error %v", pagesDir, pagesDirErr)
+			log_error.Tracef("failed to create directory %v due to error %v", pagesDir, pagesDirErr)
 			return
 		}
 		cmd_extract_pages_in_pdf := exec.Command(m_required_binaries["pdfcpu"], "extract", "-mode", "page", record.PDFPath, pagesDir)
@@ -149,16 +148,16 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 		cmd_extract_pages_in_pdf_err := cmd_extract_pages_in_pdf.Run()
 		sem_pdfcpu.Release()
 		if cmd_extract_pages_in_pdf_err != nil {
-			log.Printf("Failed to execute command `pdfcpu extract -mode page %v %v` due to error: %s\n", record.PDFPath, pagesDir, cmd_extract_pages_in_pdf_err)
+			log_error.Tracef("Failed to execute command `pdfcpu extract -mode page %v %v` due to error: %s\n", record.PDFPath, pagesDir, cmd_extract_pages_in_pdf_err)
 			return
 		}
 	} else {
-		log.Printf("not performing `pdfcpu extrace -mode page %v %v` because the directory %v already has PDFs inside it", record.PDFPath, pagesDir, pagesDir)
+		log_info.Printf("not performing `pdfcpu extrace -mode page %v %v` because the directory %v already has PDFs inside it", record.PDFPath, pagesDir, pagesDir)
 	}
 
 	pagesDirWalkErr := filepath.Walk(pagesDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			log.Printf("Error accessing a path %q: %v\n", path, err)
+			log_error.Tracef("Error accessing a path %q: %v\n", path, err)
 			return err
 		}
 
@@ -219,11 +218,11 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 			if err != nil {
 				return err
 			}
-			log.Printf("sending page %d (ID %v) from record %v URL %v into the ch_GeneratingPng", pgNo, identifier, record.Identifier, record.URL)
+			log_info.Printf("sending page %d (ID %v) from record %v URL %v into the ch_GeneratingPng", pgNo, identifier, record.Identifier, record.URL)
 			if ch_GeneratePng.CanWrite() {
 				err := ch_GeneratePng.Write(pp)
 				if err != nil {
-					log.Printf("cannot send pp into ch_GeneratePng channel due to error %v", err)
+					log_error.Tracef("cannot send pp into ch_GeneratePng channel due to error %v", err)
 					return err
 				}
 			}
@@ -233,7 +232,7 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 	})
 
 	if pagesDirWalkErr != nil {
-		log.Printf("Error walking the path ./pages: %v\n", pagesDirWalkErr)
+		log_error.Tracef("Error walking the path ./pages: %v\n", pagesDirWalkErr)
 		return
 	}
 
@@ -241,7 +240,7 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 }
 
 func convertPageToPng(ctx context.Context, pp PendingPage) {
-	log.Printf("started convertPageToPng(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
+	log_info.Printf("started convertPageToPng(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 	/*
 		pdf_to_png: "pdftoppm REPLACE_WITH_PNG_OPTS REPLACE_WITH_FILE_PATH REPLACE_WITH_PNG_PATH",
 	*/
@@ -259,22 +258,22 @@ func convertPageToPng(ctx context.Context, pp PendingPage) {
 		cmd_err := cmd.Run()
 		sem_pdftoppm.Release()
 		if cmd_err != nil {
-			log.Printf("failed to convert page %v to png %v due to error: %s\n", filepath.Base(pp.PDFPath), pp.PNG.Light.Original, cmd_err)
+			log_error.Tracef("failed to convert page %v to png %v due to error: %s\n", filepath.Base(pp.PDFPath), pp.PNG.Light.Original, cmd_err)
 			return
 		}
 
 		pngRenameErr := os.Rename(fmt.Sprintf("%v-1.png", originalFilename), fmt.Sprintf("%v.png", originalFilename))
 		if pngRenameErr != nil {
-			log.Printf("failed to rename the jpg %v due to error: %v", originalFilename, pngRenameErr)
+			log_error.Tracef("failed to rename the jpg %v due to error: %v", originalFilename, pngRenameErr)
 			return
 		}
 	}
 
-	log.Printf("completed convertPageToPng now sending %v (%v.%v) -> ch_GenerateLight ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
+	log_info.Printf("completed convertPageToPng now sending %v (%v.%v) -> ch_GenerateLight ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 	if ch_GenerateLight.CanWrite() {
 		err := ch_GenerateLight.Write(pp)
 		if err != nil {
-			log.Printf("canot send pp into ch_GenerateLight due to error %v", err)
+			log_error.Tracef("canot send pp into ch_GenerateLight due to error %v", err)
 			return
 		}
 	}
@@ -283,20 +282,20 @@ func convertPageToPng(ctx context.Context, pp PendingPage) {
 
 func generateLightThumbnails(ctx context.Context, pp PendingPage) {
 	defer func() {
-		log.Printf("completed generateLightThumbnails now sending %v (%v.%v) -> ch_GenerateDark ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
+		log_info.Printf("completed generateLightThumbnails now sending %v (%v.%v) -> ch_GenerateDark ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 		if ch_GenerateDark.CanWrite() {
 			err := ch_GenerateDark.Write(pp)
 			if err != nil {
-				log.Printf("cannot send pp into the ch_GenerateDark due to error %v", err)
+				log_error.Tracef("cannot send pp into the ch_GenerateDark due to error %v", err)
 				return
 			}
 		}
 	}()
-	log.Printf("started generateLightThumbnails(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
+	log_info.Printf("started generateLightThumbnails(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 
 	original, err := os.Open(pp.PNG.Light.Original)
 	if err != nil {
-		log.Printf("failed to open pp.OriginalPath(%v) due to error %v", pp.PNG.Light.Original, err)
+		log_error.Tracef("failed to open pp.OriginalPath(%v) due to error %v", pp.PNG.Light.Original, err)
 		return
 	}
 
@@ -305,7 +304,7 @@ func generateLightThumbnails(ctx context.Context, pp PendingPage) {
 	if os.IsNotExist(llgErr) {
 		lgResizeErr := resizePng(original, 999, pp.PNG.Light.Large)
 		if lgResizeErr != nil {
-			log.Printf("failed to resize jpg %v due to error %v", pp.PNG.Light.Large, lgResizeErr)
+			log_error.Tracef("failed to resize jpg %v due to error %v", pp.PNG.Light.Large, lgResizeErr)
 			return
 		}
 	}
@@ -315,7 +314,7 @@ func generateLightThumbnails(ctx context.Context, pp PendingPage) {
 	if os.IsNotExist(lmdErr) {
 		mdResizeErr := resizePng(original, 666, pp.PNG.Light.Medium)
 		if mdResizeErr != nil {
-			log.Printf("failed to resize jpg %v due to error %v", pp.PNG.Light.Medium, mdResizeErr)
+			log_error.Tracef("failed to resize jpg %v due to error %v", pp.PNG.Light.Medium, mdResizeErr)
 			return
 		}
 	}
@@ -325,7 +324,7 @@ func generateLightThumbnails(ctx context.Context, pp PendingPage) {
 	if os.IsNotExist(lsmErr) {
 		smResizeErr := resizePng(original, 333, pp.PNG.Light.Small)
 		if smResizeErr != nil {
-			log.Printf("failed to resize jpg %v due to error %v", pp.PNG.Light.Small, smResizeErr)
+			log_error.Tracef("failed to resize jpg %v due to error %v", pp.PNG.Light.Small, smResizeErr)
 			return
 		}
 	}
@@ -334,16 +333,16 @@ func generateLightThumbnails(ctx context.Context, pp PendingPage) {
 
 func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
 	defer func() {
-		log.Printf("completed generateDarkThumbnails now sending %v (%v.%v) -> ch_PerformOcr ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
+		log_info.Printf("completed generateDarkThumbnails now sending %v (%v.%v) -> ch_PerformOcr ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 		if ch_PerformOcr.CanWrite() {
 			err := ch_PerformOcr.Write(pp)
 			if err != nil {
-				log.Printf("cant write to the ch_PerformOcr due to error %v", err)
+				log_error.Tracef("cant write to the ch_PerformOcr due to error %v", err)
 				return
 			}
 		}
 	}()
-	log.Printf("started generateDarkThumbnails(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
+	log_info.Printf("started generateDarkThumbnails(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 	// task: the pp.Light.Original into pp.Dark.Original
 
 	_, ppdoErr := os.Stat(pp.PNG.Dark.Original)
@@ -358,7 +357,7 @@ func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
 		cmdA_err := cmdA.Run()
 		sem_convert.Release()
 		if cmdA_err != nil {
-			log.Printf("failed to convert %v into %v due to error: %s\n", pp.PNG.Light.Original, pp.PNG.Dark.Original, cmdA_err)
+			log_info.Tracef("failed to convert %v into %v due to error: %s\n", pp.PNG.Light.Original, pp.PNG.Dark.Original, cmdA_err)
 			return
 		}
 
@@ -372,14 +371,14 @@ func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
 		cmdB_err := cmdB.Run()
 		sem_convert.Release()
 		if cmdB_err != nil {
-			log.Printf("failed to convert %v into %v due to error: %s\n", pp.PNG.Light.Original, pp.PNG.Dark.Original, cmdB_err)
+			log_error.Tracef("failed to convert %v into %v due to error: %s\n", pp.PNG.Light.Original, pp.PNG.Dark.Original, cmdB_err)
 			return
 		}
 	}
 
 	original, err := os.Open(pp.PNG.Dark.Original)
 	if err != nil {
-		log.Printf("failed to open pp.OriginalPath(%v) due to error %v", pp.PNG.Dark.Original, err)
+		log_error.Tracef("failed to open pp.OriginalPath(%v) due to error %v", pp.PNG.Dark.Original, err)
 		return
 	}
 
@@ -388,7 +387,7 @@ func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
 	if os.IsNotExist(dlgErr) {
 		lgResizeErr := resizePng(original, 999, pp.PNG.Dark.Large)
 		if lgResizeErr != nil {
-			log.Printf("failed to resize jpg %v due to error %v", pp.PNG.Dark.Large, lgResizeErr)
+			log_error.Tracef("failed to resize jpg %v due to error %v", pp.PNG.Dark.Large, lgResizeErr)
 			return
 		}
 	}
@@ -398,7 +397,7 @@ func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
 	if os.IsNotExist(dmdErr) {
 		mdResizeErr := resizePng(original, 666, pp.PNG.Dark.Medium)
 		if mdResizeErr != nil {
-			log.Printf("failed to resize jpg %v due to error %v", pp.PNG.Dark.Medium, mdResizeErr)
+			log_error.Tracef("failed to resize jpg %v due to error %v", pp.PNG.Dark.Medium, mdResizeErr)
 			return
 		}
 	}
@@ -408,7 +407,7 @@ func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
 	if os.IsNotExist(dsmErr) {
 		smResizeErr := resizePng(original, 333, pp.PNG.Dark.Small)
 		if smResizeErr != nil {
-			log.Printf("failed to resize jpg %v due to error %v", pp.PNG.Dark.Small, smResizeErr)
+			log_error.Tracef("failed to resize jpg %v due to error %v", pp.PNG.Dark.Small, smResizeErr)
 			return
 		}
 	}
@@ -417,11 +416,11 @@ func generateDarkThumbnails(ctx context.Context, pp PendingPage) {
 
 func performOcrOnPdf(ctx context.Context, pp PendingPage) {
 	defer func() {
-		log.Printf("completed performOcrOnPdf now sending %v (%v.%v) -> ch_ConvertToJpg ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
+		log_info.Printf("completed performOcrOnPdf now sending %v (%v.%v) -> ch_ConvertToJpg ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 		if ch_ConvertToJpg.CanWrite() {
 			err := ch_ConvertToJpg.Write(pp)
 			if err != nil {
-				log.Printf("cant write to the ch_ConverToJpg due to error %v", err)
+				log_error.Tracef("cant write to the ch_ConverToJpg due to error %v", err)
 				return
 			}
 		}
@@ -435,7 +434,7 @@ func performOcrOnPdf(ctx context.Context, pp PendingPage) {
 		if (ppOcrPathErr == nil || !os.IsNotExist(ppOcrPathErr)) && ocrStat.Size() > 0 {
 			ocrText, ocrTextErr := os.ReadFile(pp.OCRTextPath)
 			if ocrTextErr != nil && len(string(ocrText)) > 6 {
-				log.Printf("finished performOcrOnPdf(%v.%v) because the file %v already has %d bytes inside it!", pp.RecordIdentifier, pp.Identifier, pp.OCRTextPath, ocrStat.Size())
+				log_info.Printf("finished performOcrOnPdf(%v.%v) because the file %v already has %d bytes inside it!", pp.RecordIdentifier, pp.Identifier, pp.OCRTextPath, ocrStat.Size())
 				return
 			}
 		}
@@ -444,14 +443,14 @@ func performOcrOnPdf(ctx context.Context, pp PendingPage) {
 		var cmd_stderr bytes.Buffer
 		cmd.Stdout = &cmd_stdout
 		cmd.Stderr = &cmd_stderr
-		log.Printf("started performOcrOnPdf(%v.%v) = %v (WAITING)", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
+		log_info.Printf("started performOcrOnPdf(%v.%v) = %v (WAITING)", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 		sem_tesseract.Acquire()
-		log.Printf("running performOcrOnPdf(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
+		log_info.Printf("running performOcrOnPdf(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 		cmd_err := cmd.Run()
 		sem_tesseract.Release()
-		log.Printf("completed performOcrOnPdf(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
+		log_info.Printf("completed performOcrOnPdf(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 		if cmd_err != nil {
-			log.Printf("Command `tesseract %v %v -l eng --psm 1` failed with error: %s\n\n\tSTDERR = %v\n\tSTDOUT = %v\n", pp.PNG.Light.Original, pp.OCRTextPath, cmd_err, cmd_stderr.String(), cmd_stdout.String())
+			log_error.Tracef("Command `tesseract %v %v -l eng --psm 1` failed with error: %s\n\n\tSTDERR = %v\n\tSTDOUT = %v\n", pp.PNG.Light.Original, pp.OCRTextPath, cmd_err, cmd_stderr.String(), cmd_stdout.String())
 			return
 		}
 	}
@@ -459,16 +458,16 @@ func performOcrOnPdf(ctx context.Context, pp PendingPage) {
 
 func convertPngToJpg(ctx context.Context, pp PendingPage) {
 	defer func() {
-		log.Printf("completed convertPngToJpg now sending %v (%v.%v) -> ch_CompletedPage ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
+		log_info.Printf("completed convertPngToJpg now sending %v (%v.%v) -> ch_CompletedPage ", pp.PDFPath, pp.RecordIdentifier, pp.Identifier)
 		if ch_AnalyzeText.CanWrite() {
 			err := ch_AnalyzeText.Write(pp)
 			if err != nil {
-				log.Printf("cant write to the ch_AnalyzeText channel due to error %v", err)
+				log_error.Tracef("cant write to the ch_AnalyzeText channel due to error %v", err)
 				return
 			}
 		}
 	}()
-	log.Printf("started convertPngToJpg(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
+	log_info.Printf("started convertPngToJpg(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 	files := map[string]string{
 		pp.PNG.Light.Original: pp.JPEG.Light.Original,
 		pp.PNG.Light.Large:    pp.JPEG.Light.Large,
@@ -484,12 +483,12 @@ func convertPngToJpg(ctx context.Context, pp PendingPage) {
 	for png, jpeg := range files {
 		f, e1 := os.Open(png)
 		if e1 != nil {
-			log.Printf("failed to convertAndOptimizePNG for file %v due to error %v", png, e1)
+			log_error.Tracef("failed to convertAndOptimizePNG for file %v due to error %v", png, e1)
 			continue
 		}
 		e2 := convertAndOptimizePNG(f, jpeg)
 		if e2 != nil {
-			log.Printf("failed to convertAndOptimizePNG(%v) due to error %v", png, e2)
+			log_error.Tracef("failed to convertAndOptimizePNG(%v) due to error %v", png, e2)
 			continue
 		}
 
@@ -497,7 +496,7 @@ func convertPngToJpg(ctx context.Context, pp PendingPage) {
 		if !os.IsNotExist(pngErr) {
 			e3 := os.Remove(png)
 			if e3 != nil {
-				log.Printf("failed to remove PNG file %v due to error %v", png, e3)
+				log_error.Tracef("failed to remove PNG file %v due to error %v", png, e3)
 			}
 		}
 	}

@@ -22,13 +22,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -82,7 +80,7 @@ func process_custom_csv_row(ctx context.Context, row []Column) error {
 }
 
 func processRecord(ctx context.Context, row []Column) error {
-	log.Printf("processRecord received for row %v", row)
+	log_info.Printf("processRecord received for row %v", row)
 
 	loadedFile := fmt.Sprintf("%s", ctx.Value(CtxKey("filename")))
 
@@ -129,12 +127,12 @@ func processRecord(ctx context.Context, row []Column) error {
 		case "creation_date", "Doc Date", "Document Date":
 			creation_date, dateErr = parseDateString(r.Value)
 			if dateErr != nil {
-				log.Printf("failed to parse the release date %v due to error %v", r.Value, dateErr)
+				log_error.Tracef("failed to parse the release date %v due to error %v", r.Value, dateErr)
 			}
 		case "release_date", "NARA Release Date":
 			release_date, dateErr = parseDateString(r.Value)
 			if dateErr != nil {
-				log.Printf("failed to parse the release date %v due to error %v", r.Value, dateErr)
+				log_error.Tracef("failed to parse the release date %v due to error %v", r.Value, dateErr)
 			}
 		case "page_count", "Num Pages", "Original Document Pages":
 			pg, err := strconv.Atoi(r.Value)
@@ -151,13 +149,13 @@ func processRecord(ctx context.Context, row []Column) error {
 		cmd.Stdout = &out
 		err := cmd.Run()
 		if err != nil {
-			log.Printf("Error running command: %v\n", err)
+			log_error.Tracef("Error running command: %v\n", err)
 			return err
 		}
 		tp := strings.TrimSpace(out.String())
 		tpi, ie := strconv.Atoi(tp)
 		if ie != nil {
-			log.Printf("Error converting pages to int: %v", ie)
+			log_error.Tracef("Error converting pages to int: %v", ie)
 			return ie
 		}
 		totalPages = int64(tpi)
@@ -167,7 +165,7 @@ func processRecord(ctx context.Context, row []Column) error {
 
 	if !strings.HasPrefix(pdf_url, "http") && strings.Contains(loadedFile, "jfk") {
 		pdf_url = jfk_pdf_download_prefix + filename
-		log.Printf("pdf_url = %v", pdf_url)
+		log_debug.Tracef("pdf_url = %v", pdf_url)
 	}
 
 	if !strings.HasPrefix(source_url, "http") {
@@ -176,7 +174,7 @@ func processRecord(ctx context.Context, row []Column) error {
 			source_url = pdf_url
 		} else {
 			// has a value, but it doesnt begin with http
-			log.Printf("ERROR: source_url doesn't begin with http but has a value of %v", source_url)
+			log_error.Tracef("ERROR: source_url doesn't begin with http but has a value of %v", source_url)
 		}
 	}
 
@@ -199,7 +197,7 @@ func processRecord(ctx context.Context, row []Column) error {
 
 	_, downloadedPdfErr := os.Stat(q_file_pdf)
 	if os.IsNotExist(downloadedPdfErr) {
-		log.Printf("downloading URL %v to %v", pdf_url, q_file_pdf)
+		log_debug.Printf("downloading URL %v to %v", pdf_url, q_file_pdf)
 		err = downloadFile(ctx, pdf_url, q_file_pdf)
 		if err != nil {
 			return err
@@ -265,12 +263,11 @@ func processRecord(ctx context.Context, row []Column) error {
 		TotalPages:          int64(totalPages),
 		CoverPageIdentifier: "",
 		Collection:          Collection{},
-		mu:                  &sync.Mutex{},
 	})
-	log.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
+	log_info.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
 	err = ch_ImportedRow.Write(rd)
 	if err != nil {
-		log.Printf("cant write to ch_ImportedRow")
+		log_error.Trace("cant write to ch_ImportedRow")
 		return err
 	}
 	return nil

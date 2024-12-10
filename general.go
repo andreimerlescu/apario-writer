@@ -18,19 +18,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 package main
 
 import (
-	`fmt`
-	`log`
-	`os`
-	`os/exec`
-	`strconv`
-	`strings`
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 )
 
 func pp_save(pp PendingPage) {
 	sm_pages.Store(pp.Identifier, pp)
 	err := WritePendingPageToJson(pp)
 	if err != nil {
-		log.Printf("failed to write pending page %v to %v because of error %v", pp.Identifier, pp.ManifestPath, err)
+		log_error.Tracef("failed to write pending page %v to %v because of error %v", pp.Identifier, pp.ManifestPath, err)
 	}
 }
 

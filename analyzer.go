@@ -19,7 +19,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"strings"
 )
@@ -30,14 +29,14 @@ func analyze_StartOnFullText(ctx context.Context, pp PendingPage) {
 		if ch_AnalyzeCryptonyms.CanWrite() {
 			err := ch_AnalyzeCryptonyms.Write(pp)
 			if err != nil {
-				log.Printf("cant write to the ch_AnalyzeCryptonyms channel due to error %v", err)
+				log_error.Printf("cant write to the ch_AnalyzeCryptonyms channel due to error %v", err)
 				return
 			}
 		}
 	}()
 	file, fileErr := os.ReadFile(pp.OCRTextPath)
 	if fileErr != nil {
-		log.Printf("Error opening file %q: %v\n", pp.OCRTextPath, fileErr)
+		log_error.Printf("Error opening file %q: %v\n", pp.OCRTextPath, fileErr)
 		return
 	}
 	pp.Dates = extractDates(string(file))
@@ -49,7 +48,7 @@ func analyzeCryptonyms(ctx context.Context, pp PendingPage) {
 		if ch_CompletedPage.CanWrite() {
 			err := ch_CompletedPage.Write(pp)
 			if err != nil {
-				log.Printf("cannot write to the ch_CompletedPage channel due to error %v", err)
+				log_error.Printf("cannot write to the ch_CompletedPage channel due to error %v", err)
 				return
 			}
 		}
@@ -58,7 +57,7 @@ func analyzeCryptonyms(ctx context.Context, pp PendingPage) {
 	var result []string
 	file, fileErr := os.ReadFile(pp.OCRTextPath)
 	if fileErr != nil {
-		log.Printf("Error opening file %q: %v\n", pp.OCRTextPath, fileErr)
+		log_error.Printf("Error opening file %q: %v\n", pp.OCRTextPath, fileErr)
 		return
 	}
 	for key := range m_cryptonyms {

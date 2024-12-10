@@ -1,20 +1,21 @@
 package main
 
 import (
-	`context`
-	`embed`
-	`encoding/json`
-	`flag`
-	`fmt`
-	`log`
-	`os`
-	`os/exec`
-	`os/signal`
-	`path/filepath`
-	`runtime`
-	`strings`
-	`syscall`
-	`time`
+	"context"
+	"embed"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"syscall"
+	"time"
 )
 
 //go:embed LICENSE
@@ -103,11 +104,58 @@ func main() {
 	}
 
 	// Use a configurable to send logs to a specific file
+	logDir := filepath.Dir(*flag_g_log_file)
+	_, ldiErr := os.Stat(logDir)
+	if ldiErr != nil && errors.Is(ldiErr, os.ErrNotExist) {
+		mkErr := os.MkdirAll(logDir, 0755)
+		if mkErr != nil {
+			log.Panicf("failed to open file %v due to %+v", *flag_g_log_file, ldiErr)
+		}
+	}
 	logFile, logFileErr := os.OpenFile(*flag_g_log_file, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0666)
 	if logFileErr != nil {
 		log.Fatal("Failed to open log file: ", logFileErr)
 	}
 	log.SetOutput(logFile) // redirect log.* to the log file versus fmt to STDOUT
+
+	// Check for cleanup failure from previous run
+	cleanupFailedPath := filepath.Join(logDir, ".cleanup_failed")
+	if _, err := os.Stat(cleanupFailedPath); err == nil {
+		// Cleanup failed file exists, perform rotation
+		if err := rotate_log_files(logDir); err != nil {
+			log.Fatalf("failed to rotate logs after cleanup failure: %v", err)
+		}
+		// Remove the cleanup failed file
+		_ = os.Remove(cleanupFailedPath)
+	}
+
+	log_files = make(map[string]*os.File)
+
+	// Initialize log files with truncation
+	debugFile, err := os.OpenFile(filepath.Join(logDir, "debug.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		log.Fatalf("failed to open debug log: %v", err)
+	}
+	log_files[cDebugLog] = debugFile
+
+	infoFile, err := os.OpenFile(filepath.Join(logDir, "info.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		closeLogFiles()
+		log.Fatalf("failed to open info log: %v", err)
+	}
+	log_files[cInfoLog] = infoFile
+
+	errorFile, err := os.OpenFile(filepath.Join(logDir, "error.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		closeLogFiles()
+		log.Fatalf("failed to open error log: %v", err)
+	}
+	log_files[cErrorLog] = errorFile
+
+	// Initialize loggers
+	log_debug = NewCustomLogger(debugFile, "DEBUG: ", log.Ldate|log.Ltime|log.Llongfile, 10)
+	log_info = NewCustomLogger(infoFile, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile, 10)
+	log_error = NewCustomLogger(errorFile, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile, 10)
 
 	// interrupt Ctrl+C and other SIGINT/SIGTERM/SIGKILL related signals to the application to quit gracefully
 	watchdog := make(chan os.Signal, 1)
@@ -117,11 +165,11 @@ func main() {
 	// process/analyze the cryptonyms from the bundled assets
 	cryptonymFile, cryptonymFileErr := fs_references.ReadFile(filepath.Join("bundled", "reference", "cryptonyms.json"))
 	if cryptonymFileErr != nil {
-		log.Printf("failed to parse cryptonyms.json file from the data directory due to error: %v", cryptonymFileErr)
+		log_error.Printf("failed to parse cryptonyms.json file from the data directory due to error: %v", cryptonymFileErr)
 	} else {
 		cryptonymMarshalErr := json.Unmarshal(cryptonymFile, &m_cryptonyms)
 		if cryptonymMarshalErr != nil {
-			log.Printf("failed to load the m_cryptonyms due to error %v", cryptonymMarshalErr)
+			log_error.Printf("failed to load the m_cryptonyms due to error %v", cryptonymMarshalErr)
 		}
 		out := ""
 		var cryptonyms []string
@@ -129,21 +177,21 @@ func main() {
 			cryptonyms = append(cryptonyms, cryptonym)
 		}
 		out = strings.Join(cryptonyms, ",")
-		log.Printf("Cryptonyms to search for: %v", out)
+		log_info.Printf("Cryptonyms to search for: %v", out)
 	}
 
 	// which action are we doing?
 	if *flag_s_download_pdf_url != "" && *flag_s_import_pdf_path != "" {
 		flag.Usage()
-		log.Printf("Cannot use --download-pdf-url with --import-pdf-path.")
+		log_error.Printf("Cannot use --download-pdf-url with --import-pdf-path.")
 		os.Exit(1)
 	} else if *flag_s_download_pdf_url != "" && *flag_s_import_directory != "" {
 		flag.Usage()
-		log.Printf("Cannot use --download-pdf-url with --import-directory.")
+		log_error.Printf("Cannot use --download-pdf-url with --import-directory.")
 		os.Exit(1)
 	} else if *flag_s_import_pdf_path != "" && *flag_s_import_directory != "" {
 		flag.Usage()
-		log.Printf("Cannot use --import-pdf-path with --import-directory.")
+		log_error.Printf("Cannot use --import-pdf-path with --import-directory.")
 		os.Exit(1)
 	} // TODO: add the xlsx and csv options
 
@@ -177,39 +225,33 @@ func main() {
 
 	var importErr error
 	if *flag_s_download_pdf_url != "" {
-		log.Printf("process_download_pdf")
 		importErr = process_download_pdf(ctx, *flag_s_download_pdf_url, *flag_s_pdf_metadata_json)
 	} else if *flag_s_import_pdf_path != "" {
-		log.Printf("process_import_pdf")
 		importErr = process_import_pdf(ctx, *flag_s_import_pdf_path, *flag_s_pdf_metadata_json)
 	} else if *flag_s_import_directory != "" {
-		log.Printf("process_import_directory")
 		importErr = process_import_directory(ctx, *flag_s_import_directory)
 	} else if *flag_s_import_csv != "" {
-		log.Printf("process_import_csv")
 		importErr = process_import_csv(ctx, *flag_s_import_csv, process_custom_csv_row)
 	} else if *flag_s_import_xlsx != "" {
-		log.Printf("process_import_xlsx")
 		importErr = process_import_xlsx(ctx, *flag_s_import_xlsx, processRecord)
 	} else {
 		panic("Improperly formatted configuration. No data to process.")
 	}
 
 	if importErr != nil {
-		log.Printf("received an error from process_import_csv/process_import_xlsx namely: %v", importErr) // a problem habbened
+		log_error.Printf("received an error from process_import_csv/process_import_xlsx namely: %v", importErr) // a problem habbened
 	}
 
 	defer func(logFile *os.File) {
 		err := logFile.Close()
 		if err != nil {
-			log.Printf("failed to close the logfile due to err: %v", err)
+			log_error.Printf("failed to close the logfile due to err: %v", err)
 		}
 	}(logFile)
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("received a cancel on the context's done channel")
 			elapsed := time.Since(startedAt)
 			log.Printf("Completed task in %.0f seconds", elapsed.Seconds())
 			return
@@ -221,10 +263,11 @@ func main() {
 			if ok {
 				d, ok := id.(Document)
 				if !ok {
-					log.Printf("cannot typecast the final result for %s as a .(Document)", d.Identifier)
+					log_error.Printf("cannot typecast the final result for %s as a .(Document)", d.Identifier)
 				}
 				a_i_received_documents.Add(1)
-				log.Printf("a_i_total_documents == a_i_received_documents ; %d == %d", a_i_total_documents.Load(), a_i_received_documents.Load())
+				log_info.Printf("a_i_total_documents == a_i_received_documents ; %d == %d",
+					a_i_total_documents.Load(), a_i_received_documents.Load())
 
 				if a_i_total_documents.Load() == a_i_received_documents.Load() {
 					log.SetOutput(os.Stdout)
@@ -241,7 +284,7 @@ func receive_watchdog_signal(watchdog chan os.Signal, logFile *os.File, cancel c
 	log.SetOutput(os.Stdout)
 	err := logFile.Close()
 	if err != nil {
-		log.Printf("failed to close the logFile due to error: %v", err)
+		log_error.Printf("failed to close the logFile due to error: %v", err)
 	}
 	defer cancel()
 
@@ -280,4 +323,37 @@ func receive_watchdog_signal(watchdog chan os.Signal, logFile *os.File, cancel c
 		terminatePID(pid)
 	}
 
+}
+
+func rotate_log_files(logDir string) error {
+	timestamp := time.Now().UTC().Format(FileFullTimeFormat)
+
+	// List of files to rotate
+	files := []string{cInfoLog, cDebugLog, cErrorLog}
+
+	for _, filename := range files {
+		oldPath := filepath.Join(logDir, filename)
+		newPath := filepath.Join(logDir, fmt.Sprintf("%s.%s", timestamp, filename))
+
+		// Check if old file exists before attempting rotation
+		if _, err := os.Stat(oldPath); err == nil {
+			if err := os.Rename(oldPath, newPath); err != nil {
+				// Create cleanup failed marker
+				cleanupFailedFile := filepath.Join(logDir, ".cleanup_failed")
+				_ = os.WriteFile(cleanupFailedFile, []byte("Cleanup failed during log rotation"), 0644)
+				return fmt.Errorf("failed to rotate %s: %v", filename, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func closeLogFiles() {
+	for name, logFile := range log_files {
+		err := logFile.Close()
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "closeLogFiles %s caused err: %+v\n", name, err)
+		}
+	}
 }

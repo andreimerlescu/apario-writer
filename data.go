@@ -20,14 +20,15 @@ package main
 import (
 	"context"
 	"image/color"
-	`regexp`
+	"os"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	gem `github.com/andreimerlescu/go-gematria`
-	sem `github.com/andreimerlescu/go-sema`
-	sch `github.com/andreimerlescu/go-smartchan`
+	gem "github.com/andreimerlescu/go-gematria"
+	sem "github.com/andreimerlescu/go-sema"
+	sch "github.com/andreimerlescu/go-smartchan"
 )
 
 const (
@@ -35,6 +36,14 @@ const (
 	c_identifier_charset = "ABCDEFGHKMNPQRSTUVWXYZ123456789"
 	c_dir_permissions    = 0111
 )
+
+const (
+	cDebugLog = "debug"
+	cInfoLog  = "info"
+	cErrorLog = "error"
+)
+
+const FileFullTimeFormat = "20060102150405GMT"
 
 var (
 	startedAt = time.Now().UTC()
@@ -112,6 +121,11 @@ var (
 	sm_documents        sync.Map
 	sm_pages            sync.Map
 
+	log_info  *CustomLogger
+	log_debug *CustomLogger
+	log_error *CustomLogger
+	log_files map[string]*os.File
+
 	// Semaphores
 	sem_tesseract  = sem.New(*flag_b_sem_tesseract)
 	sem_download   = sem.New(*flag_b_sem_download)
@@ -156,7 +170,6 @@ type Document struct {
 	TotalPages          int64          `json:"total_pages"`
 	CoverPageIdentifier string         `json:"cover_page_identifier"`
 	Collection          Collection     `json:"collection"`
-	mu                  *sync.Mutex
 }
 
 type Page struct {
