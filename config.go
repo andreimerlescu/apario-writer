@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"path/filepath"
 
 	con "github.com/andreimerlescu/configurable"
@@ -33,22 +32,22 @@ var (
 	flag_s_database_directory        = config.NewString("database-directory", "", "the database directory for the apario-reader instance to consume")
 	flag_i_sem_limiter               = config.NewInt("limit", channel_buffer_size, "Number of rows to concurrently process.")
 	flag_i_buffer                    = config.NewInt("buffer", reader_buffer_bytes, "Memory allocation for CSV buffer (min 168 * 1024 = 168KB)")
-	flag_b_sem_tesseract             = config.NewInt("tesseract", 1, "Semaphore Limiter for `tesseract` binary.")
-	flag_b_sem_download              = config.NewInt("download", 2, "Semaphore Limiter for downloading PDF files from URLs.")
-	flag_b_sem_pdfcpu                = config.NewInt("pdfcpu", 14, "Semaphore Limiter for `pdfcpu` binary.")
-	flag_b_sem_gs                    = config.NewInt("gs", 14, "Semaphore Limiter for `gs` binary.")
-	flag_b_sem_pdftotext             = config.NewInt("pdftotext", 14, "Semaphore Limiter for `pdftotext` binary.")
-	flag_b_sem_convert               = config.NewInt("convert", 14, "Semaphore Limiter for `convert` binary.")
-	flag_b_sem_pdftoppm              = config.NewInt("pdftoppm", 14, "Semaphore Limiter for `pdftoppm` binary.")
-	flag_g_sem_png2jpg               = config.NewInt("png2jpg", 369, "Semaphore Limiter for converting PNG images to JPG.")
-	flag_g_sem_resize                = config.NewInt("resize", 369, "Semaphore Limiter for resize PNG or JPG images.")
-	flag_g_sem_shafile               = config.NewInt("shafile", 369, "Semaphore Limiter for calculating the SHA256 checksum of files.")
-	flag_g_sem_watermark             = config.NewInt("watermark", 369, "Semaphore Limiter for adding a watermark to an image.")
-	flag_g_sem_darkimage             = config.NewInt("darkimage", 369, "Semaphore Limiter for converting an image to dark mode.")
-	flag_g_sem_filedata              = config.NewInt("filedata", 369, "Semaphore Limiter for writing metadata about a processed file to JSON.")
-	flag_g_sem_shastring             = config.NewInt("shastring", 369, "Semaphore Limiter for calculating the SHA256 checksum of a string.")
-	flag_g_sem_wjsonfile             = config.NewInt("wjsonfile", 369, "Semaphore Limiter for writing a JSON file to disk.")
-	flag_g_jpg_quality               = config.NewInt("jpeg-quality", 88, "Quality percentage (as int 1-100) for compressing PNG images into JPEG files.")
+	flag_b_sem_tesseract             = config.NewInt("tesseract", 4, "Semaphore Limiter for `tesseract` binary.")
+	flag_b_sem_download              = config.NewInt("download", 1, "Semaphore Limiter for downloading PDF files from URLs.")
+	flag_b_sem_pdfcpu                = config.NewInt("pdfcpu", 28, "Semaphore Limiter for `pdfcpu` binary.")
+	flag_b_sem_gs                    = config.NewInt("gs", 28, "Semaphore Limiter for `gs` binary.")
+	flag_b_sem_pdftotext             = config.NewInt("pdftotext", 28, "Semaphore Limiter for `pdftotext` binary.")
+	flag_b_sem_convert               = config.NewInt("convert", 28, "Semaphore Limiter for `convert` binary.")
+	flag_b_sem_pdftoppm              = config.NewInt("pdftoppm", 28, "Semaphore Limiter for `pdftoppm` binary.")
+	flag_g_sem_png2jpg               = config.NewInt("png2jpg", 999, "Semaphore Limiter for converting PNG images to JPG.")
+	flag_g_sem_resize                = config.NewInt("resize", 999, "Semaphore Limiter for resize PNG or JPG images.")
+	flag_g_sem_shafile               = config.NewInt("shafile", 999, "Semaphore Limiter for calculating the SHA256 checksum of files.")
+	flag_g_sem_watermark             = config.NewInt("watermark", 999, "Semaphore Limiter for adding a watermark to an image.")
+	flag_g_sem_darkimage             = config.NewInt("darkimage", 999, "Semaphore Limiter for converting an image to dark mode.")
+	flag_g_sem_filedata              = config.NewInt("filedata", 999, "Semaphore Limiter for writing metadata about a processed file to JSON.")
+	flag_g_sem_shastring             = config.NewInt("shastring", 999, "Semaphore Limiter for calculating the SHA256 checksum of a string.")
+	flag_g_sem_wjsonfile             = config.NewInt("wjsonfile", 999, "Semaphore Limiter for writing a JSON file to disk.")
+	flag_g_jpg_quality               = config.NewInt("jpeg-quality", 96, "Quality percentage (as int 1-100) for compressing PNG images into JPEG files.")
 	flag_g_progressive_jpeg          = config.NewBool("progressive", true, "Convert compressed JPEG images into progressive images.")
-	flag_g_log_file                  = config.NewString("log", filepath.Join(".", "logs", fmt.Sprintf("apario-writer-%04d-%02d-%02d-%02d-%02d-%02d.log", startedAt.Year(), startedAt.Month(), startedAt.Day(), startedAt.Hour(), startedAt.Minute(), startedAt.Second())), "File to save logs to. Default is logs/engine-YYYY-MM-DD-HH-MM-SS.log")
+	flag_g_log_file                  = config.NewString("log", filepath.Join(".", "logs", "writer.log"), "File to save logs to. Default is logs/engine-YYYY-MM-DD-HH-MM-SS.log")
 )

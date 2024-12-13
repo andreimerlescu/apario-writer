@@ -20,6 +20,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,56 +32,62 @@ import (
 func validatePdf(ctx context.Context, record ResultData) (ResultData, error) {
 	log_info.Printf("started validatePdf(%v) = %v", record.Identifier, record.PDFPath)
 
-	_, rjsonErr := os.Stat(record.RecordPath)
-	if os.IsNotExist(rjsonErr) {
-		/*
-			pdfcpu validate REPLACE_WITH_FILE_PATH | grep 'validation ok'
-		*/
-		cmd0_validate_pdf := exec.Command(m_required_binaries["pdfcpu"], "validate", record.PDFPath)
-		var cmd0_validate_pdf_stdout bytes.Buffer
-		var cmd0_validate_pdf_stderr bytes.Buffer
-		cmd0_validate_pdf.Stdout = &cmd0_validate_pdf_stdout
-		cmd0_validate_pdf.Stderr = &cmd0_validate_pdf_stderr
-		sem_pdfcpu.Acquire()
-		cmd0_validate_pdf_err := cmd0_validate_pdf.Run()
-		sem_pdfcpu.Release()
+	repaired := false
 
-		if cmd0_validate_pdf_err != nil {
-			return record, fmt.Errorf("Failed to execute `pdfcpu validate %v` due to error: %s\n", record.PDFPath, cmd0_validate_pdf_err)
+	pdf_info, analyze_err := analyze_pdf_path(record.PDFPath)
+	if analyze_err != nil {
+		repair_err := repair_pdf(record.PDFPath)
+		if repair_err != nil {
+			return record, errors.Join(repair_err, analyze_err)
 		}
+		repaired = true
+		var analyze_err2 error
+		pdf_info, analyze_err2 = analyze_pdf_path(record.PDFPath)
+		if analyze_err2 != nil {
+			return record, errors.Join(analyze_err, analyze_err2)
+		}
+	}
+	if pdf_info.Infos != nil && pdf_info.Infos[0].Pages == 0 && pdf_info.Infos[0].Pages != pdf_info.Infos[0].PageCount {
+		pdf_info.Infos[0].Pages = pdf_info.Infos[0].PageCount
+	}
 
-		if !strings.Contains(cmd0_validate_pdf_stdout.String(), "validation ok") {
-			return record, fmt.Errorf("failed to validate the pdf %v\n\tSTDOUT = %v", record.PDFPath, cmd0_validate_pdf_stdout.String())
-		}
-		/*
-			gs -q -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 -o REPLACE_WITH_FILE_PATH REPLACE_WITH_FILE_PATH
-		*/
-		cmd1_convert_pdf := exec.Command(m_required_binaries["gs"], "-q -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 -o", record.PDFPath, record.PDFPath)
-		var cmd1_convert_pdf_stdout bytes.Buffer
-		var cmd1_convert_pdf_stderr bytes.Buffer
-		cmd1_convert_pdf.Stdout = &cmd1_convert_pdf_stdout
-		cmd1_convert_pdf.Stderr = &cmd1_convert_pdf_stderr
-		sem_gs.Acquire()
-		cmd1_convert_pdf_err := cmd1_convert_pdf.Run()
-		sem_gs.Release()
-		if cmd1_convert_pdf_err != nil {
-			return record, fmt.Errorf("Failed to execute command `gs -q -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 -o %v %v` due to error: %s\n", record.PDFPath, record.PDFPath, cmd1_convert_pdf_err)
-		}
+	if pdf_info.Infos[0].Pages == 0 {
+		log_error.Tracef("failed to set pdf_info.Pages to pdf_info.PageCount\n"+
+			"pdf_info = %+v", pdf_info)
+	}
 
-		/*
-			pdfcpu optimize REPLACE_WITH_FILE_PATH
-		*/
-		cmd2_optimize_pdf := exec.Command(m_required_binaries["pdfcpu"], "optimize", record.PDFPath)
-		var cmd2_optimize_pdf_stdout bytes.Buffer
-		var cmd2_optimize_pdf_stderr bytes.Buffer
-		cmd2_optimize_pdf.Stdout = &cmd2_optimize_pdf_stdout
-		cmd2_optimize_pdf.Stderr = &cmd2_optimize_pdf_stderr
-		sem_pdfcpu.Acquire()
-		cmd2_optimize_pdf_err := cmd2_optimize_pdf.Run()
-		sem_pdfcpu.Release()
-		if cmd2_optimize_pdf_err != nil {
-			return record, fmt.Errorf("Failed to execute command `pdfcpu optimize %v` due to error: %s\n", record.PDFPath, cmd2_optimize_pdf_err)
+	validate_err := validate_pdf(record.PDFPath)
+	if validate_err != nil {
+		if !repaired {
+			repair_err := repair_pdf(record.PDFPath)
+			if repair_err != nil {
+				log_error.Tracef("failed validate_pdf and repair_pdf %s with two errors:\n %v\n %v",
+					filepath.Base(record.PDFPath), validate_err, repair_err)
+				return record, errors.Join(repair_err, validate_err, analyze_err)
+			}
+			repaired = true
 		}
+	}
+	var prepare_err error
+	if !repaired {
+		prepare_err = prepare_pdf(record.PDFPath)
+		if prepare_err != nil {
+			return record, prepare_err
+		}
+	}
+	optimize_err := optimize_pdf(record.PDFPath)
+	if optimize_err != nil {
+		return record, optimize_err
+	}
+	_, analyze_err2 := analyze_pdf_path(record.PDFPath)
+	if analyze_err2 != nil {
+		log_debug.Fatalf("analyze_pdf_pdf failed after prepare_pdf and optimize_pdf were successful\n\n"+
+			"   analyze_err = %+v\n"+
+			"   validate_err = %+v\n"+
+			"   prepare_err = %+v\n"+
+			"   optimize_err = %+v\n"+
+			"   analyze_err = %+v\n",
+			analyze_err, validate_err, prepare_err, optimize_err, analyze_err2)
 	}
 
 	return record, nil
@@ -133,6 +140,7 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 			performPagesExtract = true
 		}
 	}
+RETRY:
 	if performPagesExtract {
 		pagesDirErr := os.MkdirAll(pagesDir, 0755)
 		if pagesDirErr != nil {
@@ -153,6 +161,11 @@ func extractPagesFromPdf(ctx context.Context, record ResultData) {
 		}
 	} else {
 		log_info.Printf("not performing `pdfcpu extrace -mode page %v %v` because the directory %v already has PDFs inside it", record.PDFPath, pagesDir, pagesDir)
+		check := len(pagesDir) == len(pagesDir)
+
+		if check {
+			goto RETRY
+		}
 	}
 
 	pagesDirWalkErr := filepath.Walk(pagesDir, func(path string, info os.FileInfo, err error) error {
@@ -244,6 +257,7 @@ func convertPageToPng(ctx context.Context, pp PendingPage) {
 	/*
 		pdf_to_png: "pdftoppm REPLACE_WITH_PNG_OPTS REPLACE_WITH_FILE_PATH REPLACE_WITH_PNG_PATH",
 	*/
+RECHECK:
 	_, loErr := os.Stat(pp.PNG.Light.Original)
 	if os.IsNotExist(loErr) {
 		originalFilename := strings.ReplaceAll(pp.PNG.Light.Original, `.png`, ``)
@@ -266,6 +280,21 @@ func convertPageToPng(ctx context.Context, pp PendingPage) {
 		if pngRenameErr != nil {
 			log_error.Tracef("failed to rename the jpg %v due to error: %v", originalFilename, pngRenameErr)
 			return
+		}
+	} else {
+		originalFile, fileErr := os.Open(pp.PNG.Light.Original)
+		if fileErr != nil {
+			if err1 := validatePNGFile(originalFile); err1 != nil {
+				if err2 := os.Remove(pp.PNG.Light.Original); err2 != nil {
+					goto RECHECK
+				} else {
+					msg := "convertPagePng() pp.PNG.Light.Original exists and has thrown 2 errors:\n" +
+						"err1 [validatePNGFile(originalFile): %+v\n" +
+						"err2 [os.Remove(pp.PNG.Light.Original]: %+v\n"
+					log_error.Panicf(msg, err1, err2)
+				}
+			}
+
 		}
 	}
 
@@ -428,17 +457,21 @@ func performOcrOnPdf(ctx context.Context, pp PendingPage) {
 
 	if ok, err := fileHasData(pp.OCRTextPath); !ok || err != nil {
 		/*
-			tesseract REPLACE_WITH_FILE_PATH REPLACE_WITH_TEXT_OUTPUT_FILE_PATH -l eng --psm 1
+			tesseract SRC DEST -l eng --psm 1
 		*/
 		ocrStat, ppOcrPathErr := os.Stat(pp.OCRTextPath)
 		if (ppOcrPathErr == nil || !os.IsNotExist(ppOcrPathErr)) && ocrStat.Size() > 0 {
 			ocrText, ocrTextErr := os.ReadFile(pp.OCRTextPath)
 			if ocrTextErr != nil && len(string(ocrText)) > 6 {
-				log_info.Printf("finished performOcrOnPdf(%v.%v) because the file %v already has %d bytes inside it!", pp.RecordIdentifier, pp.Identifier, pp.OCRTextPath, ocrStat.Size())
+				log_info.Printf(
+					"finished performOcrOnPdf(%v.%v) because the file %v already has %d bytes inside it!",
+					pp.RecordIdentifier, pp.Identifier, pp.OCRTextPath, ocrStat.Size())
 				return
 			}
 		}
-		cmd := exec.Command(m_required_binaries["tesseract"], pp.PNG.Light.Original, strings.TrimSuffix(pp.OCRTextPath, ".txt"), `-l`, `eng`, `--psm`, `1`)
+		src := pp.PNG.Light.Original
+		dest := strings.TrimSuffix(pp.OCRTextPath, `.txt`)
+		cmd := exec.Command(m_required_binaries["tesseract"], src, dest, `-l`, `eng`, `--psm`, `1`)
 		var cmd_stdout bytes.Buffer
 		var cmd_stderr bytes.Buffer
 		cmd.Stdout = &cmd_stdout
@@ -450,7 +483,9 @@ func performOcrOnPdf(ctx context.Context, pp PendingPage) {
 		sem_tesseract.Release()
 		log_info.Printf("completed performOcrOnPdf(%v.%v) = %v", pp.RecordIdentifier, pp.Identifier, pp.PDFPath)
 		if cmd_err != nil {
-			log_error.Tracef("Command `tesseract %v %v -l eng --psm 1` failed with error: %s\n\n\tSTDERR = %v\n\tSTDOUT = %v\n", pp.PNG.Light.Original, pp.OCRTextPath, cmd_err, cmd_stderr.String(), cmd_stdout.String())
+			log_error.Tracef(
+				"Command `tesseract %v %v -l eng --psm 1` failed with error: %s\n\n\tSTDERR = %v\n\tSTDOUT = %v\n",
+				src, dest, cmd_err, cmd_stderr.String(), cmd_stdout.String())
 			return
 		}
 	}
@@ -481,6 +516,10 @@ func convertPngToJpg(ctx context.Context, pp PendingPage) {
 		pp.PNG.Dark.Social:    pp.JPEG.Dark.Social,
 	}
 	for png, jpeg := range files {
+		if strings.HasSuffix(png, `social.png`) || strings.HasSuffix(jpeg, `social.jpg`) {
+			// TODO - skip social.png until its implemented
+			continue
+		}
 		f, e1 := os.Open(png)
 		if e1 != nil {
 			log_error.Tracef("failed to convertAndOptimizePNG for file %v due to error %v", png, e1)

@@ -182,30 +182,31 @@ type Page struct {
 }
 
 type PDFCPUInfoResponseInfo struct {
-	Source             string         `json:"source"`
-	Version            string         `json:"version"`
-	Pages              int            `json:"pages"`
-	Title              string         `json:"title"`
-	Author             string         `json:"author"`
-	Subject            string         `json:"subject"`
-	CreationDate       string         `json:"creationDate"`
-	ModificationDate   string         `json:"modificationDate"`
-	Keywords           []string       `json:"keywords"`
-	Properties         map[string]any `json:"properties"`
-	Tagged             bool           `json:"tagged"`
-	Hybrid             bool           `json:"hybrid"`
-	Linearized         bool           `json:"linearized"`
-	UsingXRefStreams   bool           `json:"usingXRefStreams"`
-	UsingObjectStreams bool           `json:"usingObjectStreams"`
-	Watermarked        bool           `json:"watermarked"`
-	Thumbnails         bool           `json:"thumbnails"`
-	Form               bool           `json:"form"`
-	Signatures         bool           `json:"signatures"`
-	AppendOnly         bool           `json:"appendOnly"`
-	Bookmarks          bool           `json:"bookmarks"`
-	Names              bool           `json:"names"`
-	Encrypted          bool           `json:"encrypted"`
-	Permissions        int            `json:"permissions"`
+	Source             string         `json:"source,omitempty"`
+	Version            string         `json:"version,omitempty"`
+	Pages              int            `json:"pages,omitempty"`
+	Title              string         `json:"title,omitempty"`
+	Author             string         `json:"author,omitempty"`
+	Subject            string         `json:"subject,omitempty"`
+	CreationDate       string         `json:"creationDate,omitempty"`
+	ModificationDate   string         `json:"modificationDate,omitempty"`
+	Keywords           []string       `json:"keywords,omitempty"`
+	Properties         map[string]any `json:"properties,omitempty"`
+	Tagged             bool           `json:"tagged,omitempty"`
+	Hybrid             bool           `json:"hybrid,omitempty"`
+	Linearized         bool           `json:"linearized,omitempty"`
+	UsingXRefStreams   bool           `json:"usingXRefStreams,omitempty"`
+	UsingObjectStreams bool           `json:"usingObjectStreams,omitempty"`
+	Watermarked        bool           `json:"watermarked,omitempty"`
+	Thumbnails         bool           `json:"thumbnails,omitempty"`
+	Form               bool           `json:"form,omitempty"`
+	Signatures         bool           `json:"signatures,omitempty"`
+	AppendOnly         bool           `json:"appendOnly,omitempty"`
+	Bookmarks          bool           `json:"bookmarks,omitempty"`
+	Names              bool           `json:"names,omitempty"`
+	Encrypted          bool           `json:"encrypted,omitempty"`
+	Permissions        int            `json:"permissions,omitempty"`
+	PageCount          int            `json:"pageCount,omitempty"`
 }
 type PDFCPUInfoResponse struct {
 	Header map[string]string        `json:"header"`

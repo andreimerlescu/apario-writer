@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -343,6 +344,12 @@ func convertAndOptimizePNG(imgFile *os.File, outputFilename string) error {
 	sem_png2jpg.Acquire()
 	defer sem_png2jpg.Release()
 
+	imgErr := validatePNGFile(imgFile)
+	if imgErr != nil {
+		log_error.Trace("convertAndOptimizePNG(imgFile)->validatePNGFile(imgFile) threw err: %+v", imgErr)
+		return imgErr
+	}
+
 	imgFile.Seek(0, 0)
 	img, err := imaging.Decode(imgFile)
 	if err != nil {
@@ -357,6 +364,11 @@ func convertAndOptimizePNG(imgFile *os.File, outputFilename string) error {
 	if rgba64, ok := img.(*image.RGBA64); ok {
 		img = rgba64ToRGBA(rgba64)
 		log_info.Printf("converting `img` %v *image.RGBA64 into %T", imgFile.Name(), img)
+	}
+
+	if nrgba, ok := img.(*image.NRGBA); ok {
+		img = nrgbaToRGBA(nrgba)
+		log_info.Printf("converting `img` %v *image.NRGBA into %T", imgFile.Name(), img)
 	}
 
 	outputFile, err2 := os.Create(outputFilename)
@@ -375,6 +387,43 @@ func convertAndOptimizePNG(imgFile *os.File, outputFilename string) error {
 	}
 
 	return nil
+}
+
+/*
+A little bot named Red lived in Paint Town. Red loved to help kids make their pictures look pretty!
+One day, tiny Tim brought a clear sheet with colors on it. "I want to show my friends!" said Tim.
+"I can help!" beeped Red. "Watch me make it pretty!"
+Red took a white paper and looked at each tiny spot on Tim's clear sheet.
+"When I see light spots," beeped Red, "I make them soft like clouds."
+"When I see bright spots," beeped Red, "I make them strong like rainbows!"
+Spot by spot, Red made Tim's picture. Some colors were soft, some were bright!
+"Wow!" smiled Tim. "Now my friends can see my picture too!"
+Red did a happy beep-boop dance. Helping make pictures was Red's favorite thing!
+The End.
+*/
+func nrgbaToRGBA(src *image.NRGBA) *image.RGBA {
+	b := src.Bounds()
+	dst := image.NewRGBA(b)
+
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, b, a := src.At(x, y).RGBA()
+
+			// Convert from non-premultiplied to premultiplied alpha
+			r = (r * a) / 0xffff
+			g = (g * a) / 0xffff
+			b = (b * a) / 0xffff
+
+			dst.SetRGBA(x, y, color.RGBA{
+				R: uint8(r >> 8),
+				G: uint8(g >> 8),
+				B: uint8(b >> 8),
+				A: uint8(a >> 8),
+			})
+		}
+	}
+
+	return dst
 }
 
 func palettedToRGBA(src *image.Paletted) *image.RGBA {
@@ -428,6 +477,95 @@ func rgba64ToRGBA(src *image.RGBA64) *image.RGBA {
 	}
 
 	return dst
+}
+
+func validatePNGFile(file *os.File) error {
+	var (
+		err          error
+		stat         os.FileInfo
+		signature          = make([]byte, 8)
+		lengthBuf          = make([]byte, 4)
+		chunkTypeBuf       = make([]byte, 4)
+		offset       int64 = 8 // Start after signature
+		hasIHDR            = false
+		hasIDAT            = false
+		hasIEND            = false
+	)
+
+	if stat, err = file.Stat(); err != nil {
+		return fmt.Errorf("failed to stat file: %v", err)
+	}
+
+	// Check min file size
+	if stat.Size() < 33 {
+		return fmt.Errorf("file too small to be valid PNG: %d bytes", stat.Size())
+	}
+
+	if _, err = file.ReadAt(signature, 0); err != nil {
+		return fmt.Errorf("failed to read PNG signature: %v", err)
+	}
+	if !bytes.Equal(signature, []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
+		return fmt.Errorf("invalid PNG signature")
+	}
+
+	// Validate chunk structure
+	for offset < stat.Size() {
+		// Read chunk length
+		if _, err = file.ReadAt(lengthBuf, offset); err != nil {
+			return fmt.Errorf("failed to read chunk length at offset %d: %v", offset, err)
+		}
+		chunkLen := binary.BigEndian.Uint32(lengthBuf)
+
+		// Read chunk type
+		if _, err = file.ReadAt(chunkTypeBuf, offset+4); err != nil {
+			return fmt.Errorf("failed to read chunk type at offset %d: %v", offset+4, err)
+		}
+		chunkType := string(chunkTypeBuf)
+
+		// Validate chunk length
+		if offset+int64(chunkLen)+12 > stat.Size() {
+			return fmt.Errorf("chunk length %d at offset %d exceeds file size", chunkLen, offset)
+		}
+
+		// Track critical chunks
+		switch chunkType {
+		case "IHDR":
+			if hasIHDR {
+				return fmt.Errorf("multiple IHDR chunks found")
+			}
+			hasIHDR = true
+			if chunkLen != 13 {
+				return fmt.Errorf("invalid IHDR chunk length: %d", chunkLen)
+			}
+		case "IDAT":
+			hasIDAT = true
+		case "IEND":
+			hasIEND = true
+			if chunkLen != 0 {
+				return fmt.Errorf("invalid IEND chunk length: %d", chunkLen)
+			}
+		}
+
+		// Move to next chunk
+		offset += int64(chunkLen) + 12 // length(4) + type(4) + data(chunkLen) + crc(4)
+	}
+
+	// Verify all critical chunks are present
+	if !hasIHDR {
+		return fmt.Errorf("missing IHDR chunk")
+	}
+	if !hasIDAT {
+		return fmt.Errorf("missing IDAT chunk")
+	}
+	if !hasIEND {
+		return fmt.Errorf("missing IEND chunk")
+	}
+
+	if _, err = file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to reset file pointer: %v", err)
+	}
+
+	return nil
 }
 
 func overlayImages(jpgFile, pngFile *os.File, outputFilename string) error {

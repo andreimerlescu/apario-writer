@@ -32,7 +32,9 @@ func aggregatePendingPage(ctx context.Context, pp PendingPage) {
 
 	data_rd, result_data_found := sm_resultdatas.Load(pp.RecordIdentifier)
 	if !result_data_found {
-		log_error.Printf("failed to find the document based on its identifier %s in the sm_resultdatas map", pp.RecordIdentifier)
+		log_error.Printf(
+			"failed to find the document based on its identifier %s in the sm_resultdatas map",
+			pp.RecordIdentifier)
 		return
 	}
 
@@ -44,7 +46,7 @@ func aggregatePendingPage(ctx context.Context, pp PendingPage) {
 
 	document_data, document_found := sm_documents.Load(pp.RecordIdentifier)
 	if !document_found {
-		log_error.Printf("failed to find the document based on its identifier %d in the sm_documents map", pp.RecordIdentifier)
+		log_error.Printf("failed to find the document based on its identifier %s in the sm_documents map", pp.RecordIdentifier)
 		return
 	}
 
@@ -54,7 +56,7 @@ func aggregatePendingPage(ctx context.Context, pp PendingPage) {
 		return
 	}
 
-	if document.TotalPages != rd.TotalPages {
+	if document.TotalPages != rd.TotalPages || document.TotalPages == 0 {
 		log_info.Printf("document.TotalPages [%d] != [%d] rd.TotalPages", document.TotalPages, rd.TotalPages)
 	}
 

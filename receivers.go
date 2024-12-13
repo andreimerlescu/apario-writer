@@ -112,7 +112,7 @@ func receiveOnGeneratePngCh(ctx context.Context, ch <-chan interface{}) {
 				log_info.Printf("received on ch_GeneratePng, running convertPageToPng(%v) for ID %v (pgNo %d)", filepath.Base(pp.PDFPath), pp.Identifier, pp.PageNumber)
 				go convertPageToPng(ctx, pp)
 			} else {
-				log_debug.Trace("ch_GeneratePng is closed but received some data")
+				log_debug.Fatalf("ch_GeneratePng is closed but received some data: %+v", ipp)
 				return
 			}
 		}

@@ -389,29 +389,29 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	// [-TO-DO-]: analyze the metadata of the pdf file to determine totalPages, currently defaulting to 0
 	pdf_analysis, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
 	if pdf_analysis_err != nil {
-		log_debug.Tracef("received an err %v on pdf_analysis for %v \n\n %+v", pdf_analysis_err, q_file_pdf, pdf_analysis)
-		return pdf_analysis_err
+		pdf_analysis, pdf_analysis_err = repair_then_analyze_pdf(q_file_pdf)
+		if pdf_analysis_err != nil {
+			return pdf_analysis_err
+		}
 	}
 
-	var info *PDFCPUInfoResponseInfo
+	var info PDFCPUInfoResponseInfo
 	if len(pdf_analysis.Infos) > 0 {
 		data := pdf_analysis.Infos[0] // capture
-		info = &data                  // point
+		info = data                   // point
 	}
 
-	if info == nil {
-		info = &PDFCPUInfoResponseInfo{Pages: 0}
+	if info.Pages == 0 && info.PageCount != info.Pages {
+		info.Pages = info.PageCount
 	}
 
 	var embedded_text string
-	if info != nil {
-		if info.Pages > 0 {
-			a_i_total_pages.Add(int64(info.Pages))
-		}
-		if len(info.Keywords) > 0 {
-			embedded_text = strings.Join(info.Keywords, " ")
-			embedded_text = strings.ReplaceAll(embedded_text, "  ", " ")
-		}
+	if info.Pages > 0 {
+		a_i_total_pages.Add(int64(info.Pages))
+	}
+	if len(info.Keywords) > 0 {
+		embedded_text = strings.Join(info.Keywords, " ")
+		embedded_text = strings.ReplaceAll(embedded_text, "  ", " ")
 	}
 
 	pdfFile, pdfFileErr := os.Open(q_file_pdf) // [-TO-DO-]: need to add some security around this process
@@ -464,7 +464,7 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 		OCRTextPath:       q_file_ocr,
 		ExtractedTextPath: q_file_extracted,
 		RecordPath:        q_file_record,
-		Info:              *info,
+		Info:              info,
 		Metadata:          metadata,
 	}
 	err = WriteResultDataToJson(rd)
@@ -572,6 +572,45 @@ func extract_text_from_pdf(path string) (string, error) {
 	return out.String(), nil
 }
 
+// optimize_pdf uses pdfcpu optimize against a PDF file path provided
+//
+//	pdfcpu optimize <path>
+func optimize_pdf(path string) error {
+	cmd2_optimize_pdf := exec.Command(m_required_binaries["pdfcpu"], "optimize", path)
+	var cmd2_optimize_pdf_stdout bytes.Buffer
+	var cmd2_optimize_pdf_stderr bytes.Buffer
+	cmd2_optimize_pdf.Stdout = &cmd2_optimize_pdf_stdout
+	cmd2_optimize_pdf.Stderr = &cmd2_optimize_pdf_stderr
+	sem_pdfcpu.Acquire()
+	cmd2_optimize_pdf_err := cmd2_optimize_pdf.Run()
+	sem_pdfcpu.Release()
+	if cmd2_optimize_pdf_err != nil {
+		return fmt.Errorf("Failed to execute command `pdfcpu optimize %v` due to error: %s\n", path, cmd2_optimize_pdf_err)
+	}
+	return nil
+}
+
+// prepare_pdf uses gs compatibility level 1.7 to prepare a PDF file path provided
+//
+//	gs -q -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 -o <path> <path>
+func prepare_pdf(path string) error {
+	cmd1_convert_pdf := exec.Command(m_required_binaries["gs"], "-q -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 -o", path, path)
+	var cmd1_convert_pdf_stdout bytes.Buffer
+	var cmd1_convert_pdf_stderr bytes.Buffer
+	cmd1_convert_pdf.Stdout = &cmd1_convert_pdf_stdout
+	cmd1_convert_pdf.Stderr = &cmd1_convert_pdf_stderr
+	sem_gs.Acquire()
+	cmd1_convert_pdf_err := cmd1_convert_pdf.Run()
+	sem_gs.Release()
+	if cmd1_convert_pdf_err != nil {
+		return fmt.Errorf("Failed to execute command `gs -q -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 -o %v %v` due to error: %s\n", path, path, cmd1_convert_pdf_err)
+	}
+	return nil
+}
+
+// repair_pdf uses gs compatibility level 1.5 to repair a PDF file path provided
+//
+//	gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.5 -dPDFSETTINGS=/prepress -dNOPAUSE -dQUIET -dBATCH -sOutputFile=<path> <path>
 func repair_pdf(path string) error {
 	dir_path := filepath.Dir(path)
 	filename := filepath.Base(path)
@@ -584,7 +623,9 @@ func repair_pdf(path string) error {
 	var err bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &err
+	sem_gs.Acquire()
 	runErr := cmd.Run()
+	sem_gs.Release()
 	if runErr != nil || strings.Contains(string(err.Bytes()), `err`) {
 		return runErr
 	}
@@ -608,12 +649,39 @@ func repair_then_analyze_pdf(path string) (PDFCPUInfoResponse, error) {
 
 }
 
+// validate_pdf uses pdfcpu validate to verify a PDF file path provided
+//
+//	pdfcpu validate <path>
+func validate_pdf(path string) error {
+	cmd0_validate_pdf := exec.Command(m_required_binaries["pdfcpu"], "validate", path)
+	var cmd0_validate_pdf_stdout bytes.Buffer
+	var cmd0_validate_pdf_stderr bytes.Buffer
+	cmd0_validate_pdf.Stdout = &cmd0_validate_pdf_stdout
+	cmd0_validate_pdf.Stderr = &cmd0_validate_pdf_stderr
+	sem_pdfcpu.Acquire()
+	cmd0_validate_pdf_err := cmd0_validate_pdf.Run()
+	sem_pdfcpu.Release()
+
+	if cmd0_validate_pdf_err != nil {
+		return fmt.Errorf("Failed to execute `pdfcpu validate %v` due to error: %s\n", path, cmd0_validate_pdf_err)
+	}
+
+	if !strings.Contains(cmd0_validate_pdf_stdout.String(), "validation ok") {
+		return fmt.Errorf("failed to validate the pdf %v\n\tSTDOUT = %v", path, cmd0_validate_pdf_stdout.String())
+	}
+	return nil
+}
+
 // analyze_pdf_path uses the `pdfcpu` utility to determine properties about a PDF file.
+//
+//	pdfcpu info -json <path>
 func analyze_pdf_path(path string) (PDFCPUInfoResponse, error) {
-	cmd := exec.Command("pdfcpu", "info", "-json", path)
+	cmd := exec.Command(m_required_binaries["pdfcpu"], "info", "-json", path)
 	var out bytes.Buffer
 	cmd.Stdout = &out
+	sem_pdfcpu.Acquire()
 	err := cmd.Run()
+	sem_pdfcpu.Release()
 	if err != nil {
 		return PDFCPUInfoResponse{}, err
 	}
