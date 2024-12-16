@@ -27,7 +27,7 @@ var fs_references embed.FS
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	for _, arg := range os.Args {
+	for i, arg := range os.Args {
 		if arg == "help" {
 			fmt.Println(config.Usage())
 			os.Exit(0)
@@ -46,10 +46,37 @@ func main() {
 				}
 			}
 		}
+		if strings.HasPrefix(arg, `-`) && strings.HasSuffix(arg, "config") {
+			if len(os.Args) >= i+1 {
+				arg_config_yaml = strings.Clone(os.Args[i+1])
+			}
+		}
 	}
 
 	// Attempt to read from the `--config` as a file, default: config.yaml
-	configErr := config.Parse(*flag_s_config_file)
+	var configErr error
+	var configStatErr error
+	var configFile string
+	if len(arg_config_yaml) > 0 {
+		_, configStatErr = os.Stat(arg_config_yaml)
+		if configStatErr == nil || !errors.Is(configStatErr, os.ErrNotExist) {
+			configFile = strings.Clone(arg_config_yaml)
+		}
+	} else {
+		if len(*flag_s_config_file) == 0 {
+			_, configStatErr = os.Stat(filepath.Join(".", "config.yaml"))
+			if configStatErr == nil || !errors.Is(configStatErr, os.ErrNotExist) {
+				configFile = filepath.Join(".", "config.yaml")
+			}
+		} else {
+			_, configStatErr = os.Stat(*flag_s_config_file)
+			if configStatErr == nil || !errors.Is(configStatErr, os.ErrNotExist) {
+				configFile = strings.Clone(*flag_s_config_file)
+			}
+		}
+	}
+
+	configErr = config.Parse(configFile)
 	if configErr != nil {
 		log.Fatalf("failed to parse config file: %v", configErr)
 	}
@@ -211,7 +238,7 @@ func main() {
 
 	// start a bunch of receiver functions to handle when data is ready to be processed
 	// each of these functions are like black boxes that ONE PAGE from a document is ingested into until it reaches the end
-	go receiveImportedRow(ctx, ch_ImportedRow.Chan())            // step 01 - runs validatePdf before sending into ch_ExtractText
+	go receiveImportedRow(ctx, ch_ImportedRow.Chan())            // step 01 - runs validate_result_data_record before sending into ch_ExtractText
 	go receiveOnExtractTextCh(ctx, ch_ExtractText.Chan())        // step 02 - runs extractPlainTextFromPdf before sending into ch_ExtractPages
 	go receiveOnExtractPagesCh(ctx, ch_ExtractPages.Chan())      // step 03 - runs extractPagesFromPdf before sending PendingPage into ch_GeneratePng
 	go receiveOnGeneratePngCh(ctx, ch_GeneratePng.Chan())        // step 04 - runs convertPageToPng before sending PendingPage into ch_GenerateLight

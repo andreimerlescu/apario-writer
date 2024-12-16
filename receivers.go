@@ -35,9 +35,9 @@ func receiveImportedRow(ctx context.Context, ch <-chan interface{}) {
 					log_error.Printf("not valid typecasting for ird to rd.(ResultData)")
 					return
 				}
-				rd, err = validatePdf(ctx, rd)
+				rd, err = validate_result_data_record(ctx, rd)
 				if err != nil {
-					log_error.Tracef("received error on validatePdf for rd.URL %v ; err = %v", rd.URL, err)
+					log_error.Tracef("received error on validate_result_data_record for rd.URL %v ; err = %v", rd.URL, err)
 				} else {
 					log_info.Printf("validated the downloaded PDF %v from URL %v, sending rd into ch_ExtractText", filepath.Base(rd.PDFPath), rd.URL)
 					if ch_ExtractText.CanWrite() {

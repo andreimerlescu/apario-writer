@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -115,18 +116,69 @@ func NewCustomLogger(w io.Writer, prefix string, flag int, maxDepth int) *Custom
 	}
 }
 
-// Trace logs a message with a stack trace
+func (l *CustomLogger) TraceReturn(v ...interface{}) error {
+	if v == nil {
+		return nil
+	}
+	msg := fmt.Sprint(v...)
+	frames := getStackFrames(2, l.maxDepth) // Skip Trace() and runtime.Caller
+	trace := formatStackTrace(frames)
+	strace := fmt.Sprintf("%s\nStack Trace:%s\n", msg, trace)
+	return l.Return(strace)
+}
+
+func (l *CustomLogger) TraceReturnf(format string, v ...interface{}) error {
+	if v == nil && format == "" {
+		return nil
+	}
+	msg := fmt.Sprintf(format, v...)
+	frames := getStackFrames(2, l.maxDepth) // Skip Trace() and runtime.Caller
+	trace := formatStackTrace(frames)
+	strace := fmt.Sprintf("%s\nStack Trace:%s\n", msg, trace)
+	return l.Return(strace)
+}
+
+func (l *CustomLogger) Return(v ...interface{}) error {
+	if v == nil {
+		return nil
+	}
+	msg := fmt.Sprint(v...)
+	err := l.Output(2, msg)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "l.Output() err: %+v", err)
+	}
+	return errors.New(msg)
+}
+
+func (l *CustomLogger) Returnf(format string, v ...interface{}) error {
+	if v == nil && format == "" {
+		return nil
+	}
+	msg := fmt.Sprintf(format, v...)
+	err := l.Output(2, msg)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "l.Output() err: %+v", err)
+	}
+	return errors.New(msg)
+}
+
 func (l *CustomLogger) Trace(v ...interface{}) {
 	msg := fmt.Sprint(v...)
 	frames := getStackFrames(2, l.maxDepth) // Skip Trace() and runtime.Caller
 	trace := formatStackTrace(frames)
-	l.Output(2, fmt.Sprintf("%s\nStack Trace:%s\n", msg, trace))
+	strace := fmt.Sprintf("%s\nStack Trace:%s\n", msg, trace)
+	err := l.Output(2, strace)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "l.Output() err: %+v", err)
+	}
 }
 
-// Tracef logs a formatted message with a stack trace
 func (l *CustomLogger) Tracef(format string, v ...interface{}) {
 	msg := fmt.Sprintf(format, v...)
 	frames := getStackFrames(2, l.maxDepth) // Skip Tracef() and runtime.Caller
 	trace := formatStackTrace(frames)
-	l.Output(2, fmt.Sprintf("%s\nStack Trace:%s\n", msg, trace))
+	err := l.Output(2, fmt.Sprintf("%s\nStack Trace:%s\n", msg, trace))
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "l.Output() err: %+v", err)
+	}
 }

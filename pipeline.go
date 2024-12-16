@@ -20,7 +20,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,67 +28,31 @@ import (
 	"strings"
 )
 
-func validatePdf(ctx context.Context, record ResultData) (ResultData, error) {
-	log_info.Printf("started validatePdf(%v) = %v", record.Identifier, record.PDFPath)
-
-	repaired := false
-
-	pdf_info, analyze_err := analyze_pdf_path(record.PDFPath)
+func validate_result_data_record(ctx context.Context, record ResultData) (ResultData, error) {
+	log_info.Printf("started validate_result_data_record(%v) = %v", record.Identifier, record.PDFPath)
+	// analyze, repair on error, then re-analyze if necessary
+	pdf_info, analyze_err := analyze_then_repair_pdf(record.PDFPath)
 	if analyze_err != nil {
-		repair_err := repair_pdf(record.PDFPath)
-		if repair_err != nil {
-			return record, errors.Join(repair_err, analyze_err)
-		}
-		repaired = true
-		var analyze_err2 error
-		pdf_info, analyze_err2 = analyze_pdf_path(record.PDFPath)
-		if analyze_err2 != nil {
-			return record, errors.Join(analyze_err, analyze_err2)
-		}
+		return record, log_error.TraceReturn(analyze_err)
 	}
+	// fix total pages
 	if pdf_info.Infos != nil && pdf_info.Infos[0].Pages == 0 && pdf_info.Infos[0].Pages != pdf_info.Infos[0].PageCount {
 		pdf_info.Infos[0].Pages = pdf_info.Infos[0].PageCount
 	}
-
+	// validate total pages
 	if pdf_info.Infos[0].Pages == 0 {
-		log_error.Tracef("failed to set pdf_info.Pages to pdf_info.PageCount\n"+
-			"pdf_info = %+v", pdf_info)
+		return record, log_error.TraceReturnf("failed to set pdf_info.Pages to pdf_info.PageCount\npdf_info = %+v", pdf_info)
 	}
-
+	// validate pdf
 	validate_err := validate_pdf(record.PDFPath)
 	if validate_err != nil {
-		if !repaired {
-			repair_err := repair_pdf(record.PDFPath)
-			if repair_err != nil {
-				log_error.Tracef("failed validate_pdf and repair_pdf %s with two errors:\n %v\n %v",
-					filepath.Base(record.PDFPath), validate_err, repair_err)
-				return record, errors.Join(repair_err, validate_err, analyze_err)
-			}
-			repaired = true
-		}
+		return record, log_error.TraceReturn(validate_err)
 	}
-	var prepare_err error
-	if !repaired {
-		prepare_err = prepare_pdf(record.PDFPath)
-		if prepare_err != nil {
-			return record, prepare_err
-		}
-	}
+	// optimize pdf
 	optimize_err := optimize_pdf(record.PDFPath)
 	if optimize_err != nil {
-		return record, optimize_err
+		return record, log_error.TraceReturn(optimize_err)
 	}
-	_, analyze_err2 := analyze_pdf_path(record.PDFPath)
-	if analyze_err2 != nil {
-		log_debug.Fatalf("analyze_pdf_pdf failed after prepare_pdf and optimize_pdf were successful\n\n"+
-			"   analyze_err = %+v\n"+
-			"   validate_err = %+v\n"+
-			"   prepare_err = %+v\n"+
-			"   optimize_err = %+v\n"+
-			"   analyze_err = %+v\n",
-			analyze_err, validate_err, prepare_err, optimize_err, analyze_err2)
-	}
-
 	return record, nil
 }
 

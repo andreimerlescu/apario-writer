@@ -40,6 +40,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -50,6 +51,62 @@ import (
 	"github.com/nfnt/resize"
 	"github.com/pixiv/go-libjpeg/jpeg"
 )
+
+// safe_path_check validates if a given file path is safe to open
+// It checks for:
+// - Path traversal attempts
+// - Absolute vs relative paths
+// - Symlink evaluation
+// - Path existence
+// - Basic file permissions
+func safe_path_check(filePath string, allowedDir string) error {
+	filePath = filepath.Clean(filePath)
+	allowedDir = filepath.Clean(allowedDir)
+
+	absAllowedDir, err := filepath.Abs(allowedDir)
+	if err != nil {
+		return errors.New("failed to resolve allowed directory path")
+	}
+
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		return errors.New("failed to resolve file path")
+	}
+
+	if !strings.HasPrefix(absFilePath, absAllowedDir) {
+		return errors.New("file path is outside of allowed directory")
+	}
+
+	realPath, err := filepath.EvalSymlinks(absFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errors.New("file does not exist")
+		}
+		return errors.New("failed to evaluate symbolic links")
+	}
+
+	if !strings.HasPrefix(realPath, absAllowedDir) {
+		return errors.New("file path after symlink evaluation is outside of allowed directory")
+	}
+
+	fileInfo, err := os.Stat(realPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errors.New("file does not exist")
+		}
+		return errors.New("failed to get file information")
+	}
+
+	// Check if it's actually a file (not a directory)
+	if fileInfo.IsDir() {
+		return errors.New("path points to a directory, not a file")
+	}
+
+	// Additional permission checks can be added here depending on your needs
+	// For example, checking specific file modes or ownership
+
+	return nil
+}
 
 func fileHasData(filename string) (bool, error) {
 	sem_filedata.Acquire()
@@ -228,23 +285,23 @@ func tryDownloadFile(ctx context.Context, url string, output string) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return log_error.TraceReturn(err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return log_error.TraceReturn(err)
 	}
 	defer resp.Body.Close()
 
 	out, err := os.Create(output)
 	if err != nil {
-		return err
+		return log_error.TraceReturn(err)
 	}
 	defer out.Close()
 
 	_, err = io.Copy(out, resp.Body)
-	return err
+	return log_error.TraceReturn(err)
 }
 
 func Sha256(in string) (checksum string) {
@@ -493,76 +550,69 @@ func validatePNGFile(file *os.File) error {
 	)
 
 	if stat, err = file.Stat(); err != nil {
-		return fmt.Errorf("failed to stat file: %v", err)
+		return log_error.TraceReturnf("failed to stat file: %v", err)
 	}
 
-	// Check min file size
 	if stat.Size() < 33 {
-		return fmt.Errorf("file too small to be valid PNG: %d bytes", stat.Size())
+		return log_error.TraceReturnf("file too small to be valid PNG: %d bytes", stat.Size())
 	}
 
 	if _, err = file.ReadAt(signature, 0); err != nil {
-		return fmt.Errorf("failed to read PNG signature: %v", err)
+		return log_error.TraceReturnf("failed to read PNG signature: %v", err)
 	}
 	if !bytes.Equal(signature, []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
-		return fmt.Errorf("invalid PNG signature")
+		return log_error.TraceReturn("invalid PNG signature")
 	}
 
-	// Validate chunk structure
 	for offset < stat.Size() {
-		// Read chunk length
 		if _, err = file.ReadAt(lengthBuf, offset); err != nil {
-			return fmt.Errorf("failed to read chunk length at offset %d: %v", offset, err)
+			return log_error.TraceReturnf("failed to read chunk length at offset %d: %v", offset, err)
 		}
 		chunkLen := binary.BigEndian.Uint32(lengthBuf)
 
-		// Read chunk type
 		if _, err = file.ReadAt(chunkTypeBuf, offset+4); err != nil {
-			return fmt.Errorf("failed to read chunk type at offset %d: %v", offset+4, err)
+			return log_error.TraceReturnf("failed to read chunk type at offset %d: %v", offset+4, err)
 		}
 		chunkType := string(chunkTypeBuf)
 
-		// Validate chunk length
 		if offset+int64(chunkLen)+12 > stat.Size() {
-			return fmt.Errorf("chunk length %d at offset %d exceeds file size", chunkLen, offset)
+			return log_error.TraceReturnf("chunk length %d at offset %d exceeds file size", chunkLen, offset)
 		}
 
-		// Track critical chunks
 		switch chunkType {
 		case "IHDR":
 			if hasIHDR {
-				return fmt.Errorf("multiple IHDR chunks found")
+				return log_error.TraceReturn("multiple IHDR chunks found")
 			}
 			hasIHDR = true
 			if chunkLen != 13 {
-				return fmt.Errorf("invalid IHDR chunk length: %d", chunkLen)
+				return log_error.TraceReturnf("invalid IHDR chunk length: %d", chunkLen)
 			}
 		case "IDAT":
 			hasIDAT = true
 		case "IEND":
 			hasIEND = true
 			if chunkLen != 0 {
-				return fmt.Errorf("invalid IEND chunk length: %d", chunkLen)
+				return log_error.TraceReturnf("invalid IEND chunk length: %d", chunkLen)
 			}
 		}
 
-		// Move to next chunk
-		offset += int64(chunkLen) + 12 // length(4) + type(4) + data(chunkLen) + crc(4)
+		offset += int64(chunkLen) + 12 // next chunk prep => length(4) + type(4) + data(chunkLen) + crc(4)
 	}
 
 	// Verify all critical chunks are present
 	if !hasIHDR {
-		return fmt.Errorf("missing IHDR chunk")
+		return log_error.TraceReturn("missing IHDR chunk")
 	}
 	if !hasIDAT {
-		return fmt.Errorf("missing IDAT chunk")
+		return log_error.TraceReturn("missing IDAT chunk")
 	}
 	if !hasIEND {
-		return fmt.Errorf("missing IEND chunk")
+		return log_error.TraceReturn("missing IEND chunk")
 	}
 
 	if _, err = file.Seek(0, 0); err != nil {
-		return fmt.Errorf("failed to reset file pointer: %v", err)
+		return log_error.TraceReturnf("failed to reset file pointer: %v", err)
 	}
 
 	return nil

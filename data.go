@@ -59,6 +59,7 @@ var (
 
 	// Strings
 	dir_current_directory string
+	arg_config_yaml       string
 
 	// Maps
 	m_cryptonyms        = make(map[string]string)

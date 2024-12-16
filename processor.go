@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -309,8 +310,7 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	recordDir := filepath.Join(*flag_s_database_directory, pdf_url_checksum)
 	err := os.MkdirAll(recordDir, 0750)
 	if err != nil {
-		log_error.Fatalf("cannot mkdir -p %v due to err %v", recordDir, err)
-		return err
+		return log_error.TraceReturnf("cannot mkdir -p %v due to err %v", recordDir, err)
 	}
 
 	var (
@@ -322,17 +322,17 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 
 	original, original_open_err := os.Open(path)
 	if original_open_err != nil {
-		return original_open_err
+		return log_error.TraceReturnf("process_import_pdf os.Open(%v) err: \n%+v", path, original_open_err)
 	}
 
 	original_stat, original_stat_err := os.Stat(path)
 	if original_stat_err != nil {
-		return original_stat_err
+		return log_error.TraceReturnf("process_import_pdf os.Stat(%v) err: \n%+v", path, original_stat_err)
 	}
 
 	destination, destination_err := os.Create(q_file_pdf)
 	if destination_err != nil {
-		return destination_err
+		return log_error.TraceReturnf("process_import_pdf os.Create(%v) err: \n%+v", q_file_pdf, destination_err)
 	}
 
 	var bufferSize int64 = 8192 // 8MB
@@ -350,23 +350,23 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 			}
 			_, write_err := destination.Write(buffer[:bytes_read])
 			if write_err != nil {
-				return write_err
+				return log_error.TraceReturnf("process_import_pdf destination.Write(buffer) err: \n%+v", write_err)
 			}
 		}
 	} else {
 		_, copy_err := io.Copy(destination, original)
 		if copy_err != nil {
-			return copy_err
+			return log_error.TraceReturnf("process_import_pdf io.Copy(destination, original) err: \n%+v", copy_err)
 		}
 	}
 
 	close_original_err := original.Close()
 	if close_original_err != nil {
-		return close_original_err
+		return log_error.TraceReturnf("process_import_pdf original.Close() err: \n%+v", close_original_err)
 	}
 	close_destination_err := destination.Close()
 	if close_destination_err != nil {
-		return close_destination_err
+		return log_error.TraceReturnf("process_import_pdf destination.Close() err: \n%+v", close_destination_err)
 	}
 
 	//log.Println("process_import_pdf() q_pdf_file = " + q_file_pdf)
@@ -376,23 +376,17 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	if !*flag_b_disable_clamav {
 		output, action_taken, clamav_scan_err := scan_path_with_clam_av(q_file_pdf)
 		if clamav_scan_err != nil {
-			log_debug.Tracef("while scanning %v clamav scan returned an err: %v", q_file_pdf, clamav_scan_err)
-			return clamav_scan_err
+			return log_debug.TraceReturnf("while scanning %v clamav scan returned an err: %v", q_file_pdf, clamav_scan_err)
 		}
 
 		if action_taken {
-			log_debug.Tracef("action taken against %v with clamav: %v", q_file_pdf, output)
-			return fmt.Errorf("antivirus action taken against %v", q_file_pdf)
+			return log_debug.TraceReturnf("action taken against %v with clamav: %v", q_file_pdf, output)
 		}
 	}
 
-	// [-TO-DO-]: analyze the metadata of the pdf file to determine totalPages, currently defaulting to 0
-	pdf_analysis, pdf_analysis_err := analyze_pdf_path(q_file_pdf)
+	pdf_analysis, pdf_analysis_err := repair_then_analyze_pdf(q_file_pdf)
 	if pdf_analysis_err != nil {
-		pdf_analysis, pdf_analysis_err = repair_then_analyze_pdf(q_file_pdf)
-		if pdf_analysis_err != nil {
-			return pdf_analysis_err
-		}
+		return log_debug.TraceReturn(pdf_analysis_err)
 	}
 
 	var info PDFCPUInfoResponseInfo
@@ -414,14 +408,19 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 		embedded_text = strings.ReplaceAll(embedded_text, "  ", " ")
 	}
 
-	pdfFile, pdfFileErr := os.Open(q_file_pdf) // [-TO-DO-]: need to add some security around this process
+	not_safe_err := safe_path_check(q_file_pdf, *flag_s_database_directory)
+	if not_safe_err != nil {
+		return log_error.TraceReturn(not_safe_err)
+	}
+
+	pdfFile, pdfFileErr := os.Open(q_file_pdf)
 	if pdfFileErr != nil {
-		return pdfFileErr
+		return log_error.TraceReturn(pdfFileErr)
 	}
 	checksum := FileSha512(pdfFile)
 	pdf_file_close_err := pdfFile.Close()
 	if pdf_file_close_err != nil {
-		return pdf_file_close_err
+		return log_error.TraceReturn(pdf_file_close_err)
 	}
 
 	metadata := make(map[string]string)
@@ -438,8 +437,6 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	if pdf_text_err != nil {
 		log_error.Tracef("pdf_text_err = %v", pdf_text_err)
 	}
-
-	//log.Printf("comparing pdf_text to embedded_text")
 
 	if len(embedded_text) > 17 {
 		save_extracted_err := write_string_to_file(q_file_extracted, embedded_text)
@@ -469,7 +466,7 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	}
 	err = WriteResultDataToJson(rd)
 	if err != nil {
-		return err
+		return log_error.Return(err)
 	}
 	sm_resultdatas.Store(identifier, rd)
 	sm_documents.Store(identifier, Document{
@@ -483,8 +480,7 @@ func process_import_pdf(ctx context.Context, path string, metadata_json string) 
 	log_info.Printf("sending URL %v (rd struct) into the ch_ImportedRow channel", rd.URL)
 	err = ch_ImportedRow.Write(rd)
 	if err != nil {
-		log_error.Tracef("cant write to ch_ImportedRow: %+v", err)
-		return err
+		return log_error.TraceReturnf("cant write to ch_ImportedRow: %+v", err)
 	}
 	return nil
 }
@@ -594,7 +590,15 @@ func optimize_pdf(path string) error {
 //
 //	gs -q -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 -o <path> <path>
 func prepare_pdf(path string) error {
-	cmd1_convert_pdf := exec.Command(m_required_binaries["gs"], "-q -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 -o", path, path)
+	parts := []string{
+		"-q",
+		"-sDEVICE=pdfwrite",
+		"-dCompatibilityLevel=1.7",
+		"-o",
+		path,
+		path,
+	}
+	cmd1_convert_pdf := exec.Command(m_required_binaries["gs"], parts...)
 	var cmd1_convert_pdf_stdout bytes.Buffer
 	var cmd1_convert_pdf_stderr bytes.Buffer
 	cmd1_convert_pdf.Stdout = &cmd1_convert_pdf_stdout
@@ -614,11 +618,19 @@ func prepare_pdf(path string) error {
 func repair_pdf(path string) error {
 	dir_path := filepath.Dir(path)
 	filename := filepath.Base(path)
-	format := `gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.5 -dPDFSETTINGS=/prepress -dNOPAUSE -dQUIET -dBATCH -sOutputFile=%s %s`
 	source_path := strings.Clone(path)
 	dest_path := filepath.Join(dir_path, "repaired_"+filename)
-	command := fmt.Sprintf(format, dest_path, source_path)
-	cmd := exec.Command(command)
+	parts := []string{
+		"-sDEVICE=pdfwrite",
+		"-dCompatibilityLevel=1.5",
+		"-dPDFSETTINGS=/prepress",
+		"-dNOPAUSE",
+		"-dQUIET",
+		"-dBATCH",
+		fmt.Sprintf("-sOutputFile=%s", dest_path),
+		source_path,
+	}
+	cmd := exec.Command(m_required_binaries["gs"], parts...)
 	var out bytes.Buffer
 	var err bytes.Buffer
 	cmd.Stdout = &out
@@ -627,15 +639,15 @@ func repair_pdf(path string) error {
 	runErr := cmd.Run()
 	sem_gs.Release()
 	if runErr != nil || strings.Contains(string(err.Bytes()), `err`) {
-		return runErr
+		return log_error.TraceReturn(runErr)
 	}
 	source_rm_err := os.Remove(source_path)
 	if source_rm_err != nil {
-		return source_rm_err
+		return log_error.TraceReturn(source_rm_err)
 	}
 	rename_err := os.Rename(dest_path, source_path)
 	if rename_err != nil {
-		return rename_err
+		return log_error.TraceReturn(rename_err)
 	}
 	return nil
 }
@@ -643,9 +655,34 @@ func repair_pdf(path string) error {
 func repair_then_analyze_pdf(path string) (PDFCPUInfoResponse, error) {
 	repair_err := repair_pdf(path)
 	if repair_err != nil {
-		return PDFCPUInfoResponse{}, repair_err
+		return PDFCPUInfoResponse{}, log_error.TraceReturn(repair_err)
 	}
 	return analyze_pdf_path(path)
+}
+
+func analyze_then_repair_pdf(path string) (PDFCPUInfoResponse, error) {
+	var (
+		pdf_info      = PDFCPUInfoResponse{}
+		repaired      = false
+		analyze_err   error
+		repair_err    error
+		reanalyze_err error
+	)
+	pdf_info, analyze_err = analyze_pdf_path(path)
+	if analyze_err != nil {
+		repair_err = repair_pdf(path)
+		if repair_err != nil {
+			return PDFCPUInfoResponse{}, log_error.Return(errors.Join(analyze_err, repair_err))
+		}
+		repaired = true
+	}
+	if repaired {
+		pdf_info, reanalyze_err = analyze_pdf_path(path)
+		if reanalyze_err != nil {
+			return PDFCPUInfoResponse{}, errors.Join(analyze_err, repair_err, reanalyze_err)
+		}
+	}
+	return pdf_info, nil
 
 }
 
